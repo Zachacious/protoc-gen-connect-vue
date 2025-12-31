@@ -1,0 +1,50 @@
+/**
+   * Standard Async: {{functionName}}
+   */
+  const {{functionName}} = async (req: {{inputType}}): Promise<APIResponse<{{outputType}}>> => {
+    const res = await callConnect(client.{{functionName}}, req, (res) => res);
+    if (!res.error) queryClient.invalidateQueries({ queryKey: ["{{resource}}"] });
+    return res;
+  };
+
+  /**
+   * TanStack Hook: {{hookName}}
+   */
+  const {{hookName}} = (
+    {{#isQuery}}
+    input: {{inputType}}, 
+    options: any = {}
+    {{/isQuery}}
+    {{^isQuery}}
+    options: any = {}
+    {{/isQuery}}
+  ) => {
+    {{#isPaginated}}
+    return useInfiniteQuery({
+      ...{{queryDefinitionName}}Def,
+      ...options,
+      queryKey: ["{{resource}}", "{{functionName}}", input],
+      initialPageParam: 1,
+      getNextPageParam: options.getNextPageParam || ((lastPage: any) => lastPage.nextPage ?? undefined),
+    });
+    {{/isPaginated}}
+    {{^isPaginated}}
+    {{#isQuery}}
+    return useQuery({
+      ...{{queryDefinitionName}}Def,
+      ...options,
+      queryKey: ["{{resource}}", "{{functionName}}", input],
+    });
+    {{/isQuery}}
+    {{^isQuery}}
+    return useMutation({
+      ...{{queryDefinitionName}}Def,
+      ...options,
+      onSuccess: async (data, variables, context) => {
+        await queryClient.invalidateQueries({ queryKey: ["{{resource}}"] });
+        if (options.onSuccess) return options.onSuccess(data, variables, context);
+      },
+    });
+    {{/isQuery}}
+    {{/isPaginated}}
+  };

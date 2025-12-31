@@ -1,0 +1,132 @@
+import { {{serviceName}} } from './gen/{{{protoPbFile}}}';
+import { createClient, ConnectError } from "@connectrpc/connect";
+import { createConnectTransport } from "@connectrpc/connect-web"; 
+
+const serverUrl = 'http://localhost:3000';
+
+// --- AUTH RESOLVER ---
+export type AuthResolver = () => string | null | Promise<string | null>;
+let resolveToken: AuthResolver = () => null;
+export const setAuthResolver = (resolver: AuthResolver) => { resolveToken = resolver; };
+
+// --- ERROR CALLBACK ---
+export type ErrorCallback = (error: ConnectError, url: string) => void;
+let onError: ErrorCallback = () => {};
+export const setSDKErrorCallback = (cb: ErrorCallback) => { onError = cb; };
+
+const transportInterceptor = (next: any) => async (req: any) => {
+  const token = await resolveToken();
+  if (token) req.header.set("x-api-key", token);
+
+  try {
+    return await next(req);
+  } catch (err) {
+    if (err instanceof ConnectError) {
+      onError(err, req.url);
+    }
+    throw err;
+  }
+};
+
+export const transport = createConnectTransport({
+  baseUrl: serverUrl,
+  interceptors: [transportInterceptor],
+});
+
+export const client = createClient({{serviceName}}, transport);
+
+/**
+ * Global TanStack Settings
+ */
+export const globalQueryConfig = {
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60 * 5,
+      gcTime: 1000 * 60 * 30,
+      networkMode: 'offlineFirst',
+      retry: (failureCount: number, error: any) => {
+        // Do not retry if the error is "Unauthenticated" (Code 16)
+        if (error instanceof ConnectError && error.code === 16) return false;
+        return failureCount < 2;
+      },
+    },
+    mutations: {
+      networkMode: 'offlineFirst',
+    }
+  },
+};
+
+export const useGrpcClient = () => ({ client });
+
+/*
+
+// the following is an example of how to use the hybrid api 
+
+// this generated sdk uses both raw wrappers and tanstack query
+
+<script setup lang="ts">
+import { useApi } from "@/api";
+import { ref } from "vue";
+
+const api = useApi();
+
+// 1. Using the TanStack Hook (Auto-refetches)
+const { data, isLoading } = api.useGetProfileQuery({ userId: "1" });
+
+// 2. Using the Manual Wrapper (For actions/buttons)
+const manualResult = ref("");
+async function handleUpdate() {
+  const { data, error } = await api.updateProfile({ name: "New User" });
+  manualResult.value = error ? error : "Success!";
+}
+</script>
+
+<template>
+  <div v-if="isLoading">Loading...</div>
+  <div v-else>{{ data?.name }}</div>
+  
+  <button @click="handleUpdate">Update Manually</button>
+  <p>{{ manualResult }}</p>
+</template>
+
+// use this to set the error interceptor - for instance to log to sentry or something
+import { setAuthResolver, setSDKErrorCallback } from '@/api';
+import { useAuthStore } from '@/stores/auth';
+
+const auth = useAuthStore();
+
+// Dynamic Auth: Returns current token from Pinia
+setAuthResolver(() => auth.token);
+
+// Flexible Error Handling:
+setSDKErrorCallback((err, url) => {
+  if (process.env.NODE_ENV === 'development') {
+    console.error(`SDK Error at ${url}:`, err.message);
+  }
+  
+  // Custom Production Logic
+  if (err.code === 16) { // Unauthenticated
+    auth.logout();
+    window.location.href = '/login';
+  }
+});
+
+
+// how to setup the auth interceptors
+// to make sure the endpoints get the token
+
+// src/stores/auth.ts
+import { defineStore } from 'pinia';
+import { setAuthResolver } from '@/api/client';
+
+export const useAuthStore = defineStore('auth', () => {
+  const token = ref(null);
+
+  // Register with the SDK
+  setAuthResolver(() => token.value);
+
+  return { token };
+});
+
+
+*/

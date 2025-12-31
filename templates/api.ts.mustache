@@ -1,0 +1,56 @@
+import { computed } from "vue";
+import { useQuery, useMutation, useInfiniteQuery, useQueryClient, useIsFetching, useIsMutating } from "@tanstack/vue-query";
+import { ConnectError } from "@connectrpc/connect";
+import { useGrpcClient } from "./client";
+
+import {
+  {{#rpcs}}
+  {{queryDefinitionName}} as {{queryDefinitionName}}Def,
+  {{/rpcs}}
+} from "./gen/{{{connectQueryFile}}}";
+
+{{#wktImports}}import type { {{.}} } from "@bufbuild/protobuf";{{/wktImports}}
+{{#localImports}}import type { {{.}} } from "./gen/{{{protoPbFile}}}";{{/localImports}}
+{{#externalImports}}
+import type { {{#types}}{{.}}, {{/types}} } from "{{{path}}}";
+{{/externalImports}}
+
+export type APIResponse<T> = { error: string | null; data: T | null; };
+
+async function callConnect<ReqT, ResT, DataT>(
+  connectMethod: (req: ReqT) => Promise<ResT>,
+  request: ReqT,
+  dataExtractor: (res: ResT) => DataT
+): Promise<APIResponse<DataT>> {
+  try {
+    const res = await connectMethod(request);
+    return { error: null, data: dataExtractor(res) };
+  } catch (err) {
+    return { 
+      error: err instanceof ConnectError ? err.message : "Unknown error", 
+      data: null 
+    };
+  }
+}
+
+export const useApi = () => {
+  const { client } = useGrpcClient();
+  const queryClient = useQueryClient();
+
+  // Global background activity tracking
+  const isFetching = useIsFetching();
+  const isMutating = useIsMutating();
+  const isGlobalLoading = computed(() => isFetching.value > 0 || isMutating.value > 0);
+
+  {{#rpcs}}
+  {{> rpc}}
+  {{/rpcs}}
+
+  return {
+    {{#rpcs}}
+    {{functionName}},
+    {{hookName}},
+    {{/rpcs}}
+    isGlobalLoading,
+  };
+};
