@@ -4,12 +4,10 @@ deploy.sh
 tsconfig.json
 bun.lockb
 .gitignore
+.github/
 
 # Logs
 npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
 
 # OS Files
 .DS_Store
-Thumbs.db

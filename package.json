@@ -3,6 +3,16 @@
   "version": "1.0.2",
   "description": "Smart TanStack Query & ConnectRPC SDK generator for Vue.js",
   "type": "module",
+  "license": "MIT",
+  "author": "Zachacious",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zachacious/protoc-gen-connect-vue.git"
+  },
+  "bugs": {
+    "url": "https://github.com/zachacious/protoc-gen-connect-vue/issues"
+  },
+  "homepage": "https://github.com/zachacious/protoc-gen-connect-vue#readme",
   "main": "dist/generator.js",
   "bin": {
     "protoc-gen-connect-vue": "bin/protoc-gen-connect-vue"

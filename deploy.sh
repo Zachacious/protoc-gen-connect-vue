@@ -3,46 +3,34 @@ set -e
 
 PACKAGE_NAME="@zachacious/protoc-gen-connect-vue"
 
-echo "--------------------------------------------------"
-echo "🚀 Preparing deployment for $PACKAGE_NAME"
-echo "--------------------------------------------------"
+echo "🚀 Starting Production Release for $PACKAGE_NAME"
 
-# 1. AUTHENTICATION CHECK
-# We check this FIRST before changing any code versions
-echo "🔑 Checking NPM authentication..."
+# 1. Clean build check
+echo "🛠  Testing build..."
+npm run build || { echo "❌ Build failed. Fix errors before deploying."; exit 1; }
+
+# 2. NPM Auth
 if ! npm whoami > /dev/null 2>&1; then
-  echo "❌ Not authenticated with NPM."
-  echo "👉 Running 'npm login' now. Please follow the prompts..."
+  echo "🔑 NPM Login required..."
   npm login
-else
-  echo "✅ Authenticated as $(npm whoami)"
 fi
 
-# 2. GIT STATE CHECK
-if [ -n "$(git status --porcelain)" ]; then 
-  echo "❌ Error: Your git working directory is not clean."
-  echo "Please commit or stash your changes before deploying."
-  exit 1
-fi
+# 3. Required files
+for file in "LICENSE" "README.md" ".npmrc"; do
+  [ -f "$file" ] || { echo "❌ Missing $file"; exit 1; }
+done
 
-# 3. BUILD
-echo "📦 Running build..."
-npm run build
+# 4. Git Check
+[ -z "$(git status --porcelain)" ] || { echo "❌ Git directory dirty. Commit first."; exit 1; }
 
-# 4. VERSIONING
-# 'npm version patch' creates a commit and a git tag automatically
-echo "🔢 Bumping version..."
+# 5. Execute Release
+echo "🔢 Bumping version and tagging..."
 npm version patch -m "chore: release %s"
 
-# 5. PUBLISHING
-# We use --access public for scoped packages (@zachacious/...)
-echo "🚢 Publishing to NPM registry..."
-npm publish --access public
+echo "🚢 Publishing to NPM..."
+npm publish
 
-# 6. SYNCING
-echo "📤 Pushing commit and tags to origin..."
+echo "📤 Syncing with Git..."
 git push origin main --tags
 
-echo "--------------------------------------------------"
-echo "✅ SUCCESS: Version $(node -p "require('./package.json').version") is live!"
-echo "--------------------------------------------------"
+echo "✅ DEPLOYMENT COMPLETE"
