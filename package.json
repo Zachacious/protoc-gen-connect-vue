@@ -1,6 +1,6 @@
 {
   "name": "@zachacious/protoc-gen-connect-vue",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Smart TanStack Query & ConnectRPC SDK generator for Vue.js",
   "type": "module",
   "main": "dist/generator.js",
