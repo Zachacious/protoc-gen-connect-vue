@@ -20,7 +20,9 @@
   "files": [
     "dist",
     "bin",
-    "templates"
+    "templates",
+    "README.md",
+    "LICENSE"
   ],
   "publishConfig": {
     "access": "public"

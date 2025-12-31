@@ -59,7 +59,7 @@ plugins:
  out: gen
  opt: target=ts
  # 3. Smart SDK Generator
- - local: connect-vue
+ - local: protoc-gen-connect-vue
  out: src/api
 ```
 
