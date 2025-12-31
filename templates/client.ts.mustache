@@ -1,8 +1,15 @@
 import { {{serviceName}} } from './gen/{{{protoPbFile}}}';
-import { createClient, ConnectError } from "@connectrpc/connect";
+import { createClient, ConnectError, type Interceptor } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web"; 
 
-const serverUrl = 'http://localhost:3000';
+let baseUrl = 'http://localhost:3000';
+
+/**
+ * Configure the API endpoint at runtime.
+ */
+export const setBaseUrl = (url: string) => {
+  baseUrl = url;
+};
 
 // --- AUTH RESOLVER ---
 export type AuthResolver = () => string | null | Promise<string | null>;
@@ -14,7 +21,7 @@ export type ErrorCallback = (error: ConnectError, url: string) => void;
 let onError: ErrorCallback = () => {};
 export const setSDKErrorCallback = (cb: ErrorCallback) => { onError = cb; };
 
-const transportInterceptor = (next: any) => async (req: any) => {
+const transportInterceptor: Interceptor = (next) => async (req) => {
   const token = await resolveToken();
   if (token) req.header.set("x-api-key", token);
 
@@ -29,30 +36,19 @@ const transportInterceptor = (next: any) => async (req: any) => {
 };
 
 export const transport = createConnectTransport({
-  baseUrl: serverUrl,
+  baseUrl,
   interceptors: [transportInterceptor],
 });
 
 export const client = createClient({{serviceName}}, transport);
 
-/**
- * Global TanStack Settings
- */
 export const globalQueryConfig = {
   defaultOptions: {
     queries: {
       staleTime: 1000 * 60 * 5,
       gcTime: 1000 * 60 * 30,
       networkMode: 'offlineFirst',
-      retry: (failureCount: number, error: any) => {
-        // Do not retry if the error is "Unauthenticated" (Code 16)
-        if (error instanceof ConnectError && error.code === 16) return false;
-        return failureCount < 2;
-      },
     },
-    mutations: {
-      networkMode: 'offlineFirst',
-    }
   },
 };
 

@@ -64,8 +64,8 @@ function isPaginatedDeep(
 }
 
 const plugin = createEcmaScriptPlugin({
-  name: "protoc-sdk-generator",
-  version: "v1.6.0",
+  name: "protoc-gen-connect-vue",
+  version: "v1.0.0",
   generateTs: (schema) => {
     let firstService = schema.files.flatMap((f) => f.services)[0];
     if (!firstService) return;
@@ -184,4 +184,8 @@ function processService(
       ([path, types]) => ({ path, types: Array.from(types) })
     ),
   };
+}
+
+function camelCase(name: string): string {
+  return name.charAt(0).toLowerCase() + name.slice(1);
 }
