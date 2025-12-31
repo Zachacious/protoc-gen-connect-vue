@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/generator.js",
   "bin": {
-    "protoc-gen-connect-vue": "./bin/protoc-gen-connect-vue"
+    "protoc-gen-connect-vue": "bin/protoc-gen-connect-vue"
   },
   "files": [
     "dist",
