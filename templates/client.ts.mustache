@@ -1,14 +1,16 @@
+import { ref, computed } from "vue";
 import { {{serviceName}} } from './gen/{{{protoPbFile}}}';
 import { createClient, ConnectError, type Interceptor } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web"; 
 
-let baseUrl = 'http://localhost:3000';
+// --- REACTIVE STATE ---
+const baseUrl = ref('http://localhost:3000');
 
 /**
  * Configure the API endpoint at runtime.
  */
 export const setBaseUrl = (url: string) => {
-  baseUrl = url;
+  baseUrl.value = url;
 };
 
 // --- AUTH RESOLVER ---
@@ -35,12 +37,20 @@ const transportInterceptor: Interceptor = (next) => async (req) => {
   }
 };
 
-export const transport = createConnectTransport({
-  baseUrl,
-  interceptors: [transportInterceptor],
-});
+/**
+ * useGrpcClient provides a reactive client.
+ * If baseUrl.value changes, the computed client updates automatically.
+ */
+export const useGrpcClient = () => {
+  const transport = computed(() => createConnectTransport({
+    baseUrl: baseUrl.value,
+    interceptors: [transportInterceptor],
+  }));
 
-export const client = createClient({{serviceName}}, transport);
+  const client = computed(() => createClient({{serviceName}}, transport.value));
+
+  return { client };
+};
 
 export const globalQueryConfig = {
   defaultOptions: {
@@ -51,8 +61,6 @@ export const globalQueryConfig = {
     },
   },
 };
-
-export const useGrpcClient = () => ({ client });
 
 /*
 

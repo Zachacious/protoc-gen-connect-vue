@@ -1,13 +1,14 @@
-import { computed } from "vue";
-import { useQuery, useMutation, useInfiniteQuery, useQueryClient, useIsFetching, useIsMutating } from "@tanstack/vue-query";
+import { computed, unref } from "vue";
+import { 
+  useQuery, 
+  useMutation, 
+  useInfiniteQuery, 
+  useQueryClient, 
+  useIsFetching, 
+  useIsMutating 
+} from "@tanstack/vue-query";
 import { ConnectError } from "@connectrpc/connect";
 import { useGrpcClient } from "./client";
-
-import {
-  {{#rpcs}}
-  {{queryDefinitionName}} as {{queryDefinitionName}}Def,
-  {{/rpcs}}
-} from "./gen/{{{connectQueryFile}}}";
 
 {{#wktImports}}import type { {{.}} } from "@bufbuild/protobuf";{{/wktImports}}
 {{#localImports}}import type { {{.}} } from "./gen/{{{protoPbFile}}}";{{/localImports}}
