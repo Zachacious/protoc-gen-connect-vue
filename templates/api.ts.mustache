@@ -8,11 +8,21 @@ import {
   useIsMutating 
 } from "@tanstack/vue-query";
 import { ConnectError } from "@connectrpc/connect";
+import { create } from "@bufbuild/protobuf";
 import { useGrpcClient } from "./client";
 
-{{#wktImports}}import type { {{.}} } from "@bufbuild/protobuf";{{/wktImports}}
-{{#localImports}}import type { {{.}} } from "./gen/{{{protoPbFile}}}";{{/localImports}}
+{{#wktImports}}
+import { {{.}}Schema } from "@bufbuild/protobuf";
+import type { {{.}} } from "@bufbuild/protobuf";
+{{/wktImports}}
+
+{{#localImports}}
+import { {{.}}Schema } from "./gen/{{{protoPbFile}}}";
+import type { {{.}} } from "./gen/{{{protoPbFile}}}";
+{{/localImports}}
+
 {{#externalImports}}
+import { {{#types}}{{.}}Schema, {{/types}} } from "{{{path}}}";
 import type { {{#types}}{{.}}, {{/types}} } from "{{{path}}}";
 {{/externalImports}}
 
@@ -34,6 +44,25 @@ async function callConnect<ReqT, ResT, DataT>(
   }
 }
 
+/**
+ * Query Keys for manual cache management
+ */
+export const queryKeys = {
+  {{#rpcs}}
+  {{functionName}}: (input?: any) => ["{{resource}}", "{{functionName}}", input] as const,
+  {{/rpcs}}
+};
+
+/**
+ * Utility to create default/empty versions of Protobuf messages 
+ * ensuring all fields (even nested ones) are initialized per schema.
+ */
+export const createEmpty = {
+  {{#messageNames}}
+  {{.}}: (data?: Partial<{{.}}>) => create({{.}}Schema, data),
+  {{/messageNames}}
+};
+
 export const useApi = () => {
   const { client } = useGrpcClient();
   const queryClient = useQueryClient();
@@ -53,5 +82,7 @@ export const useApi = () => {
     {{hookName}},
     {{/rpcs}}
     isGlobalLoading,
+    queryKeys,
+    createEmpty
   };
 };

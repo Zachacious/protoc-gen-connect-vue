@@ -106,6 +106,37 @@ function processType(
 }
 
 /**
+ * Deeply crawls messages to find every nested message type
+ * so we can create "Empty" initializers for everything, not just RPC types.
+ */
+function collectAllMessages(
+  message: DescMessage,
+  serviceFile: DescFile,
+  wktImports: Set<string>,
+  localImports: Set<string>,
+  externalImports: Map<string, Set<string>>,
+  seen = new Set<string>()
+) {
+  if (seen.has(message.typeName)) return;
+  seen.add(message.typeName);
+
+  processType(message, serviceFile, wktImports, localImports, externalImports);
+
+  for (const field of message.fields) {
+    if (field.fieldKind === "message") {
+      collectAllMessages(
+        field.message,
+        serviceFile,
+        wktImports,
+        localImports,
+        externalImports,
+        seen
+      );
+    }
+  }
+}
+
+/**
  * Transforms a Protobuf Service Descriptor into the ViewData.
  */
 function processService(
@@ -117,26 +148,32 @@ function processService(
   const wktImports = new Set<string>();
   const localImports = new Set<string>();
   const externalImports = new Map<string, Set<string>>();
+  const allSeenMessages = new Set<string>();
 
   for (const method of service.methods) {
-    const inputBaseName = processType(
+    // Crawl inputs and outputs deeply
+    collectAllMessages(
       method.input,
       service.file,
       wktImports,
       localImports,
-      externalImports
+      externalImports,
+      allSeenMessages
     );
-    const outputBaseName = processType(
+    collectAllMessages(
       method.output,
       service.file,
       wktImports,
       localImports,
-      externalImports
+      externalImports,
+      allSeenMessages
     );
+
+    const inputBaseName = method.input.name;
+    const outputBaseName = method.output.name;
     const camelName =
       method.name.charAt(0).toLowerCase() + method.name.slice(1);
 
-    // Resource Invalidation Logic
     const mutationVerbs = [
       "Create",
       "Update",
@@ -158,9 +195,6 @@ function processService(
     const isMutation = mutationVerbs.some((verb) =>
       method.name.startsWith(verb)
     );
-
-    // We cast methodKind to any for the comparison to prevent the TS(2367) error
-    // while ensuring we are checking for the Unary (1) type.
     const isUnary = (method.methodKind as any) === METHOD_KIND_UNARY;
 
     rpcs.push({
@@ -175,11 +209,17 @@ function processService(
     });
   }
 
+  // Final list of all unique message names for the createEmpty utility
+  const messageNames = Array.from(allSeenMessages).map((fullPath) => {
+    return fullPath.split(".").pop();
+  });
+
   return {
     serviceName: service.name,
     protoPbFile,
     connectQueryFile,
     rpcs,
+    messageNames,
     wktImports: Array.from(wktImports),
     localImports: Array.from(localImports),
     externalImports: Array.from(externalImports.entries()).map(
@@ -193,7 +233,7 @@ function processService(
 
 const plugin = createEcmaScriptPlugin({
   name: "protoc-gen-connect-vue",
-  version: "v1.0.2",
+  version: "v1.0.3",
   generateTs: (schema) => {
     let firstService = schema.files.flatMap((f) => f.services)[0];
     if (!firstService) return;

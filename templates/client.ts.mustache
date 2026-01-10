@@ -3,6 +3,15 @@ import { {{serviceName}} } from './gen/{{{protoPbFile}}}';
 import { createClient, ConnectError, type Interceptor } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web"; 
 
+// This workaround insures that bigints returned from the backend 
+// can be serialized - otherwise you will run into some hard to pin down bugs
+// dealing with bigint serialization
+if (!(BigInt.prototype as any).toJSON) {
+  (BigInt.prototype as any).toJSON = function () {
+    return this.toString();
+  };
+}
+
 // --- REACTIVE STATE ---
 const baseUrl = ref('http://localhost:3000');
 

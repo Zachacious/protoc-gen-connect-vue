@@ -25,7 +25,7 @@ const {{hookName}} = (
 ) => {
   {{#isPaginated}}
   return useInfiniteQuery({
-    queryKey: ["{{resource}}", "{{functionName}}", input],
+    queryKey: queryKeys.{{functionName}}(input),
     queryFn: async ({ pageParam }) => {
       const req = { ...unref(input), page: pageParam }; 
       return client.value.{{functionName}}(req);
@@ -39,7 +39,7 @@ const {{hookName}} = (
   {{^isPaginated}}
   {{#isQuery}}
   return useQuery({
-    queryKey: ["{{resource}}", "{{functionName}}", input],
+    queryKey: queryKeys.{{functionName}}(input),
     queryFn: () => client.value.{{functionName}}(unref(input)),
     ...options,
   });
