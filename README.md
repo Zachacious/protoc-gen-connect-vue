@@ -4,7 +4,7 @@ protoc-gen-connect-vue is a code generation plugin for [ConnectRPC](https://conn
 
 Unlike the official @connectrpc/connect-query which is architected for React, this plugin is built from the ground up for Vue developers, providing first-class support for ref, computed, and manual resource invalidation.
 
-> Note: this would made for personal and internal projects. If you find it useful, let me know.
+> Note: I made this for use in personal and internal work projects. If you find it useful, let me know.
 
 ## **Features**
 
