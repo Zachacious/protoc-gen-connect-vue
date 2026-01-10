@@ -1,8 +1,10 @@
 # **protoc-gen-connect-vue**
 
-protoc-gen-connect-vue is a code generation plugin for [ConnectRPC](https://connectrpc.com/) tailored specifically for Vue.js. It generates a type-safe SDK that combines the power of ConnectRPC with the reactivity of the Vue Composition API and the caching capabilities of TanStack Query (Vue).
+protoc-gen-connect-vue is a code generation plugin for [ConnectRPC](https://connectrpc.com/) tailored specifically for **Vue.js**. It generates a type-safe SDK that combines the power of **ConnectRPC** with the reactivity of the Vue Composition API and the caching capabilities of **TanStack Query (Vue-Query)**.
 
 Unlike the official @connectrpc/connect-query which is architected for React, this plugin is built from the ground up for Vue developers, providing first-class support for ref, computed, and manual resource invalidation.
+
+Protoc-gen-connect-vue attempts to create the full SDK - The client and API Wrappers(standard and Vue-Query). If you are building a Vue.js project with a ConnectRPC(web) backend. This aims to be an all in one solution so you are ready to go client-side.
 
 > Note: I made this for use in personal and internal work projects. If you find it useful, let me know.
 
