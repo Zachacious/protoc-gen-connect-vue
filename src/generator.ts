@@ -9,10 +9,6 @@ import * as fs from "fs";
 import * as path from "path";
 import Mustache from "mustache";
 
-/**
- * Protobuf MethodKind constants per the internal spec:
- * Unary = 1, ServerStreaming = 2, ClientStreaming = 3, BiDiStreaming = 4
- */
 const METHOD_KIND_UNARY = 1;
 
 const KNOWN_TYPES: Record<string, string> = {
@@ -24,43 +20,17 @@ const KNOWN_TYPES: Record<string, string> = {
 const currentDir = new URL(".", import.meta.url).pathname;
 const templateDir = path.join(currentDir, "..", "templates");
 
-const clientTemplate = fs.readFileSync(
-  path.join(templateDir, "client.ts.mustache"),
-  "utf-8"
-);
-const apiTemplate = fs.readFileSync(
-  path.join(templateDir, "api.ts.mustache"),
-  "utf-8"
-);
-const rpcPartial = fs.readFileSync(
-  path.join(templateDir, "rpc.ts.mustache"),
-  "utf-8"
-);
-const indexTemplate = fs.readFileSync(
-  path.join(templateDir, "index.ts.mustache"),
-  "utf-8"
-);
+const clientTemplate = fs.readFileSync(path.join(templateDir, "client.ts.mustache"), "utf-8");
+const apiTemplate = fs.readFileSync(path.join(templateDir, "api.ts.mustache"), "utf-8");
+const rpcPartial = fs.readFileSync(path.join(templateDir, "rpc.ts.mustache"), "utf-8");
+const indexTemplate = fs.readFileSync(path.join(templateDir, "index.ts.mustache"), "utf-8");
 const partials = { rpc: rpcPartial };
 
-/**
- * Recursively inspects a message for pagination fields.
- */
-function isPaginatedDeep(
-  message: DescMessage,
-  visited = new Set<string>()
-): boolean {
+function isPaginatedDeep(message: DescMessage, visited = new Set<string>()): boolean {
   if (visited.has(message.typeName)) return false;
   visited.add(message.typeName);
 
-  const pagingKeys = [
-    "page",
-    "offset",
-    "cursor",
-    "limit",
-    "pagesize",
-    "pagenumber",
-  ];
-
+  const pagingKeys = ["page", "offset", "cursor", "limit", "pagesize", "pagenumber"];
   for (const field of message.fields) {
     if (pagingKeys.includes(field.name.toLowerCase())) return true;
     if (field.fieldKind === "message") {
@@ -71,7 +41,8 @@ function isPaginatedDeep(
 }
 
 /**
- * Resolves the TypeScript type name and tracks necessary imports.
+ * FIXED: This now calculates imports relative to the output root,
+ * which is where api.ts is generated.
  */
 function processType(
   typeDesc: DescMessage,
@@ -88,27 +59,21 @@ function processType(
     return KNOWN_TYPES[fullTypeName];
   }
 
+  // We are generating api.ts and client.ts in the root of the output directory.
+  // The proto-generated files reside in the 'gen' folder (by convention of your plugin).
+  const importPath = `./gen/${typeDesc.file.name.replace(".proto", "_pb")}`;
+
   if (typeDesc.file.name === serviceFile.name) {
     localImports.add(baseName);
-    return baseName;
+  } else {
+    if (!externalImports.has(importPath)) {
+      externalImports.set(importPath, new Set<string>());
+    }
+    externalImports.get(importPath)!.add(baseName);
   }
-
-  const importPath = `./gen/${path.relative(
-    path.dirname(serviceFile.name),
-    path.dirname(typeDesc.file.name)
-  )}/${path.basename(typeDesc.file.name, ".proto")}_pb`;
-
-  if (!externalImports.has(importPath)) {
-    externalImports.set(importPath, new Set<string>());
-  }
-  externalImports.get(importPath)!.add(baseName);
   return baseName;
 }
 
-/**
- * Deeply crawls messages to find every nested message type
- * so we can create "Empty" initializers for everything, not just RPC types.
- */
 function collectAllMessages(
   message: DescMessage,
   serviceFile: DescFile,
@@ -124,26 +89,12 @@ function collectAllMessages(
 
   for (const field of message.fields) {
     if (field.fieldKind === "message") {
-      collectAllMessages(
-        field.message,
-        serviceFile,
-        wktImports,
-        localImports,
-        externalImports,
-        seen
-      );
+      collectAllMessages(field.message, serviceFile, wktImports, localImports, externalImports, seen);
     }
   }
 }
 
-/**
- * Transforms a Protobuf Service Descriptor into the ViewData.
- */
-function processService(
-  service: DescService,
-  protoPbFile: string,
-  connectQueryFile: string
-) {
+function processService(service: DescService, protoPbFile: string) {
   const rpcs: any[] = [];
   const wktImports = new Set<string>();
   const localImports = new Set<string>();
@@ -151,83 +102,36 @@ function processService(
   const allSeenMessages = new Set<string>();
 
   for (const method of service.methods) {
-    // Crawl inputs and outputs deeply
-    collectAllMessages(
-      method.input,
-      service.file,
-      wktImports,
-      localImports,
-      externalImports,
-      allSeenMessages
-    );
-    collectAllMessages(
-      method.output,
-      service.file,
-      wktImports,
-      localImports,
-      externalImports,
-      allSeenMessages
-    );
+    collectAllMessages(method.input, service.file, wktImports, localImports, externalImports, allSeenMessages);
+    collectAllMessages(method.output, service.file, wktImports, localImports, externalImports, allSeenMessages);
 
-    const inputBaseName = method.input.name;
-    const outputBaseName = method.output.name;
-    const camelName =
-      method.name.charAt(0).toLowerCase() + method.name.slice(1);
-
-    const mutationVerbs = [
-      "Create",
-      "Update",
-      "Delete",
-      "Remove",
-      "Patch",
-      "Post",
-      "Set",
-      "Add",
-    ];
+    const camelName = method.name.charAt(0).toLowerCase() + method.name.slice(1);
+    const mutationVerbs = ["Create", "Update", "Delete", "Remove", "Patch", "Post", "Set", "Add"];
     let resource = method.name;
-    mutationVerbs.forEach((verb) => {
-      if (method.name.startsWith(verb))
-        resource = method.name.replace(verb, "");
-    });
-    if (method.name.startsWith("ListAll"))
-      resource = method.name.replace("ListAll", "");
-
-    const isMutation = mutationVerbs.some((verb) =>
-      method.name.startsWith(verb)
-    );
-    const isUnary = (method.methodKind as any) === METHOD_KIND_UNARY;
-
+    mutationVerbs.forEach((verb) => { if (method.name.startsWith(verb)) resource = method.name.replace(verb, ""); });
+    
     rpcs.push({
       functionName: camelName,
       hookName: `use${method.name}`,
-      queryDefinitionName: camelName,
       resource,
-      inputType: inputBaseName,
-      outputType: outputBaseName,
-      isQuery: isUnary && !isMutation,
-      isPaginated: isPaginatedDeep(method.input) && isUnary && !isMutation,
+      inputType: method.input.name,
+      outputType: method.output.name,
+      isQuery: (method.methodKind as any) === METHOD_KIND_UNARY && !mutationVerbs.some(v => method.name.startsWith(v)),
+      isPaginated: isPaginatedDeep(method.input) && (method.methodKind as any) === METHOD_KIND_UNARY,
     });
   }
-
-  // Final list of all unique message names for the createEmpty utility
-  const messageNames = Array.from(allSeenMessages).map((fullPath) => {
-    return fullPath.split(".").pop();
-  });
 
   return {
     serviceName: service.name,
     protoPbFile,
-    connectQueryFile,
     rpcs,
-    messageNames,
+    messageNames: Array.from(allSeenMessages).map(m => m.split('.').pop()),
     wktImports: Array.from(wktImports),
     localImports: Array.from(localImports),
-    externalImports: Array.from(externalImports.entries()).map(
-      ([path, types]) => ({
-        path,
-        types: Array.from(types),
-      })
-    ),
+    externalImports: Array.from(externalImports.entries()).map(([path, types]) => ({
+      path,
+      types: Array.from(types),
+    })),
   };
 }
 
@@ -239,18 +143,10 @@ const plugin = createEcmaScriptPlugin({
     if (!firstService) return;
 
     const protoFileStem = firstService.file.name.replace(".proto", "");
-    const viewData = processService(
-      firstService,
-      `${protoFileStem}_pb`,
-      `${protoFileStem}-${firstService.name}_connectquery`
-    );
+    const viewData = processService(firstService, `${protoFileStem}_pb`);
 
-    schema
-      .generateFile("client.ts")
-      .print(Mustache.render(clientTemplate, viewData));
-    schema
-      .generateFile("api.ts")
-      .print(Mustache.render(apiTemplate, viewData, partials));
+    schema.generateFile("client.ts").print(Mustache.render(clientTemplate, viewData));
+    schema.generateFile("api.ts").print(Mustache.render(apiTemplate, viewData, partials));
     schema.generateFile("index.ts").print(Mustache.render(indexTemplate, {}));
   },
 });

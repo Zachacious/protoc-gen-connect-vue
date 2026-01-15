@@ -8,12 +8,14 @@ import {
   useIsMutating 
 } from "@tanstack/vue-query";
 import { ConnectError } from "@connectrpc/connect";
-import { create } from "@bufbuild/protobuf";
+// FIXED: MessageInit is the correct type for 'create' payload
+import { create, type MessageInit } from "@bufbuild/protobuf";
 import { useGrpcClient } from "./client";
 
 {{#wktImports}}
-import { {{.}}Schema } from "@bufbuild/protobuf";
-import type { {{.}} } from "@bufbuild/protobuf";
+// FIXED: Path for v2 WKTs
+import { {{.}}Schema } from "@bufbuild/protobuf/wkt";
+import type { {{.}} } from "@bufbuild/protobuf/wkt";
 {{/wktImports}}
 
 {{#localImports}}
@@ -44,9 +46,6 @@ async function callConnect<ReqT, ResT, DataT>(
   }
 }
 
-/**
- * Query Keys for manual cache management
- */
 export const queryKeys = {
   {{#rpcs}}
   {{functionName}}: (input?: any) => ["{{resource}}", "{{functionName}}", input] as const,
@@ -55,11 +54,10 @@ export const queryKeys = {
 
 /**
  * Utility to create default/empty versions of Protobuf messages 
- * ensuring all fields (even nested ones) are initialized per schema.
  */
 export const createEmpty = {
   {{#messageNames}}
-  {{.}}: (data?: Partial<{{.}}>) => create({{.}}Schema, data),
+  {{.}}: (data?: MessageInit<{{.}}>) => create({{.}}Schema, data),
   {{/messageNames}}
 };
 
@@ -67,7 +65,6 @@ export const useApi = () => {
   const { client } = useGrpcClient();
   const queryClient = useQueryClient();
 
-  // Global background activity tracking
   const isFetching = useIsFetching();
   const isMutating = useIsMutating();
   const isGlobalLoading = computed(() => isFetching.value > 0 || isMutating.value > 0);
