@@ -8,20 +8,13 @@ import {
   useIsMutating 
 } from "@tanstack/vue-query";
 import { ConnectError } from "@connectrpc/connect";
-// FIXED: MessageInit is the correct type for 'create' payload
 import { create, type MessageInit } from "@bufbuild/protobuf";
 import { useGrpcClient } from "./client";
 
 {{#wktImports}}
-// FIXED: Path for v2 WKTs
 import { {{.}}Schema } from "@bufbuild/protobuf/wkt";
 import type { {{.}} } from "@bufbuild/protobuf/wkt";
 {{/wktImports}}
-
-{{#localImports}}
-import { {{.}}Schema } from "./gen/{{{protoPbFile}}}";
-import type { {{.}} } from "./gen/{{{protoPbFile}}}";
-{{/localImports}}
 
 {{#externalImports}}
 import { {{#types}}{{.}}Schema, {{/types}} } from "{{{path}}}";
@@ -52,9 +45,6 @@ export const queryKeys = {
   {{/rpcs}}
 };
 
-/**
- * Utility to create default/empty versions of Protobuf messages 
- */
 export const createEmpty = {
   {{#messageNames}}
   {{.}}: (data?: MessageInit<{{.}}>) => create({{.}}Schema, data),
