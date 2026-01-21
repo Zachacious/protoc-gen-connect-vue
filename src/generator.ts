@@ -1,10 +1,6 @@
 #!/usr/bin/env node
 import { createEcmaScriptPlugin, runNodeJs } from "@bufbuild/protoplugin";
-import {
-  type DescService,
-  type DescMessage,
-  type DescField,
-} from "@bufbuild/protobuf";
+import { type DescService, type DescMessage } from "@bufbuild/protobuf";
 import * as fs from "fs";
 import * as path from "path";
 import Mustache from "mustache";
@@ -28,10 +24,6 @@ const templates = {
   index: fs.readFileSync(path.join(templateDir, "index.ts.mustache"), "utf-8"),
 };
 
-/**
- * RECURSIVE PATH FINDER
- * Prioritizes finding the actual scalar token/number field.
- */
 function findPaginationPath(
   msg: DescMessage,
   isRequest: boolean,
@@ -49,13 +41,11 @@ function findPaginationPath(
   const resKeywords = ["nextpagetoken", "nextpage", "nextcursor"];
   const targets = isRequest ? reqKeywords : resKeywords;
 
-  // 1. Search Nested Objects FIRST (Fixes the "premature stop" issue)
-  // We prefer "page.page_token" over just "page"
+  // 1. Check Nested Objects (Prioritize objects named "page" or "paging")
   for (const f of msg.fields) {
     if (f.fieldKind === "message") {
-      // Don't recurse into generic fields unless they look promising
-      // But always recurse into "page", "paging", "meta"
       const name = f.name.toLowerCase();
+      // Recurse if the field name looks like a pagination container
       if (
         name.includes("page") ||
         name.includes("meta") ||
@@ -67,23 +57,13 @@ function findPaginationPath(
     }
   }
 
-  // 2. Direct field match (Scalar)
+  // 2. Check Direct Fields
   for (const f of msg.fields) {
     const normalized = f.name.toLowerCase().replace(/_/g, "");
     if (targets.some((t) => normalized.includes(t))) return [f.name];
   }
 
   return null;
-}
-
-/**
- * Safe runtime check for repeated fields.
- */
-function isRepeatedSafe(f: DescField): boolean {
-  // Exclude maps
-  if (f.fieldKind === "map") return false;
-  // Runtime check for 'repeated' property
-  return "repeated" in f && (f as any).repeated === true;
 }
 
 function processService(service: DescService) {
@@ -125,21 +105,18 @@ function processService(service: DescService) {
     const isMutation = mutationVerbs.some((v) => name.startsWith(v));
     const isQuery = isUnary && !isMutation;
 
+    // Discovery
     const reqPath = findPaginationPath(m.input, true);
     const resPath = findPaginationPath(m.output, false);
-    const hasRepeatedList = m.output.fields.some((f) => isRepeatedSafe(f));
 
-    // Dual Hook Logic
-    const isPaginated = isQuery && hasRepeatedList && !!reqPath && !!resPath;
+    // DECISION: If we found paths for BOTH request and response, it is definitely paginated.
+    // We do NOT check for repeated fields anymore because checking DescField properties is fragile.
+    const isPaginated = isQuery && !!reqPath && !!resPath;
 
-    // Debug Info
     debugLog.push(`Method: ${name}`);
-    debugLog.push(
-      `  isUnary: ${isUnary}, isMutation: ${isMutation} -> isQuery: ${isQuery}`,
-    );
+    debugLog.push(`  isQuery: ${isQuery}`);
     debugLog.push(`  reqPath: ${reqPath?.join(".")}`);
     debugLog.push(`  resPath: ${resPath?.join(".")}`);
-    debugLog.push(`  hasRepeatedList: ${hasRepeatedList}`);
     debugLog.push(`  FINAL: isPaginated = ${isPaginated}`);
     debugLog.push("---");
 
@@ -171,13 +148,13 @@ function processService(service: DescService) {
       path,
       types: Array.from(types),
     })),
-    debugInfo: debugLog.join("\n"), // Pass to template
+    debugInfo: debugLog.join("\n"),
   };
 }
 
 const plugin = createEcmaScriptPlugin({
   name: "protoc-gen-connect-vue",
-  version: "v1.9.0",
+  version: "v1.10.0",
   generateTs: (schema) => {
     const service = schema.files.flatMap((f) => f.services)[0];
     if (!service) return;
