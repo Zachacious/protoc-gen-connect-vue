@@ -1,5 +1,6 @@
 /**
  * Async Action: {{functionName}}
+ * Manual execution outside of the reactive cycle.
  */
 const {{functionName}} = async (req: {{inputType}}): Promise<APIResponse<{{outputType}}>> => {
   const res = await callConnect(client.value.{{functionName}}.bind(client.value), req, (res) => res);
@@ -10,7 +11,8 @@ const {{functionName}} = async (req: {{inputType}}): Promise<APIResponse<{{outpu
 };
 
 /**
- * Hook: {{hookName}}
+ * TanStack Hook: {{hookName}}
+ * Reactive hook for Vue components.
  */
 const {{hookName}} = (
   {{#isQuery}}
@@ -25,6 +27,7 @@ const {{hookName}} = (
   return useInfiniteQuery({
     queryKey: queryKeys.{{functionName}}(input),
     queryFn: async ({ pageParam }) => {
+      // Deep clone to safely inject pageParam
       const req = JSON.parse(JSON.stringify(unref(input)));
       const path = "{{reqPath}}".split('.');
       
@@ -42,8 +45,8 @@ const {{hookName}} = (
       const path = "{{resPath}}".split('.');
       const val = path.reduce((o, i) => o?.[i], lastPage);
       
+      // Structural Extraction: handle common field names or objects
       if (typeof val === 'object' && val !== null) {
-        // Fallback chain for common Protobuf pagination field names
         return val.nextPageToken || val.nextPage || (val.pageNumber ? val.pageNumber + 1 : undefined);
       }
       return val || undefined;

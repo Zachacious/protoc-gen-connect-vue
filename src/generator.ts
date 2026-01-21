@@ -26,25 +26,24 @@ const templates = {
 
 /**
  * Structural path finder for pagination.
+ * Traverses messages to find specific field names.
  */
-function findPaginationPath(
-  msg: DescMessage,
-  targets: string[],
-  depth = 0,
-): string[] | null {
+function findPaginationPath(msg: DescMessage, depth = 0): string[] | null {
   if (depth > 3) return null;
 
-  // Look for the actual value fields (page_number, token, etc.)
-  const terminals = ["pagenumber", "offset", "pagetoken", "cursor", "page"];
+  // Targets for page numbers or tokens
+  const targets = ["pagenumber", "offset", "pagetoken", "cursor"];
+
+  // 1. Direct field hit
   for (const f of msg.fields) {
     const normalized = f.name.toLowerCase().replace(/_/g, "");
-    if (terminals.includes(normalized)) return [f.name];
+    if (targets.includes(normalized)) return [f.name];
   }
 
-  // Recurse into nested objects (like 'page' or 'paging')
+  // 2. Recurse into common paging objects (like 'page' or 'paging')
   for (const f of msg.fields) {
     if (f.fieldKind === "message") {
-      const subPath = findPaginationPath(f.message, targets, depth + 1);
+      const subPath = findPaginationPath(f.message, depth + 1);
       if (subPath) return [f.name, ...subPath];
     }
   }
@@ -76,9 +75,10 @@ function processService(service: DescService) {
 
     const name = m.name;
 
-    // FIX: Using string comparison as required by your descriptor version
+    // PER SPEC: methodKind is a string union "unary" | "server_streaming" | etc.
     const isUnary = m.methodKind === "unary";
 
+    // Determine if it's a "Write" operation
     const mutationVerbs = [
       "Create",
       "Update",
@@ -89,21 +89,20 @@ function processService(service: DescService) {
       "Set",
       "Add",
     ];
-    const isMutationVerb = mutationVerbs.some((v) => name.startsWith(v));
-    const isQueryVerb = ["Get", "List", "Search"].some((v) =>
-      name.startsWith(v),
-    );
+    const isMutation = mutationVerbs.some((v) => name.startsWith(v));
 
-    // A Query is a Unary call that isn't a mutation
-    const isQuery = isUnary && (isQueryVerb || !isMutationVerb);
+    // Semantic Query: Any Unary method that isn't a mutation
+    const isQuery = isUnary && !isMutation;
 
-    const reqPath = findPaginationPath(m.input, []);
-    const resPath = findPaginationPath(m.output, []);
+    // Detect Pagination Structure
+    const reqPath = findPaginationPath(m.input);
+    const resPath = findPaginationPath(m.output);
     const isPaginated = isQuery && !!reqPath && !!resPath;
 
     return {
       functionName: name.charAt(0).toLowerCase() + name.slice(1),
       hookName: `use${name}`,
+      // Resource grouping for cache keys: ListAllCustomers -> Customers
       resource:
         name.replace(
           /^(Get|ListAll|List|Search|Create|Update|Delete|Remove|Patch|Post|Set|Add)/,
@@ -133,7 +132,7 @@ function processService(service: DescService) {
 
 const plugin = createEcmaScriptPlugin({
   name: "protoc-gen-connect-vue",
-  version: "v1.1.6",
+  version: "v1.2.1",
   generateTs: (schema) => {
     const service = schema.files.flatMap((f) => f.services)[0];
     if (!service) return;
