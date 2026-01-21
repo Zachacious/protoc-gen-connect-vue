@@ -25,29 +25,71 @@ const templates = {
 };
 
 /**
- * Structural path finder for pagination.
- * Traverses messages to find specific field names.
+ * The Scoring Engine: Finds the best pagination candidates.
  */
-function findPaginationPath(msg: DescMessage, depth = 0): string[] | null {
+function findBestPaginationCandidate(
+  msg: DescMessage,
+  isRequest: boolean,
+  depth = 0,
+): { path: string[]; type: "string" | "number"; score: number } | null {
   if (depth > 3) return null;
 
-  // Targets for page numbers or tokens
-  const targets = ["pagenumber", "offset", "pagetoken", "cursor"];
+  let best: {
+    path: string[];
+    type: "string" | "number";
+    score: number;
+  } | null = null;
 
-  // 1. Direct field hit
   for (const f of msg.fields) {
-    const normalized = f.name.toLowerCase().replace(/_/g, "");
-    if (targets.includes(normalized)) return [f.name];
-  }
+    let currentScore = 0;
+    const name = f.name.toLowerCase().replace(/_/g, "");
 
-  // 2. Recurse into common paging objects (like 'page' or 'paging')
-  for (const f of msg.fields) {
+    // 1. Name Analysis
+    const reqKeywords = ["token", "page", "offset", "cursor", "start", "skip"];
+    const resKeywords = ["next", "token", "more", "hasmore", "cursor", "total"];
+    const targets = isRequest ? reqKeywords : resKeywords;
+
+    if (targets.some((t) => name.includes(t))) currentScore += 10;
+    if (name.includes("pagetoken") || name.includes("nextpage"))
+      currentScore += 15;
+
+    // 2. Type Analysis
+    const isString = f.fieldKind === "scalar" && f.scalar === 9; // TYPE_STRING
+    const isNumber =
+      f.fieldKind === "scalar" &&
+      [3, 4, 5, 13, 17, 18].includes(f.scalar as number);
+
+    if (isString || isNumber) {
+      currentScore += 5;
+      if (!best || currentScore > best.score) {
+        best = {
+          path: [f.name],
+          type: isString ? "string" : "number",
+          score: currentScore,
+        };
+      }
+    }
+
+    // 3. Structural Analysis (Recursion)
     if (f.fieldKind === "message") {
-      const subPath = findPaginationPath(f.message, depth + 1);
-      if (subPath) return [f.name, ...subPath];
+      const nested = findBestPaginationCandidate(
+        f.message,
+        isRequest,
+        depth + 1,
+      );
+      if (nested) {
+        const nestedScore = nested.score + 12; // Encapsulated paging (like PageRequest) is high signal
+        if (!best || nestedScore > best.score) {
+          best = {
+            path: [f.name, ...nested.path],
+            type: nested.type,
+            score: nestedScore,
+          };
+        }
+      }
     }
   }
-  return null;
+  return best;
 }
 
 function processService(service: DescService) {
@@ -62,7 +104,6 @@ function processService(service: DescService) {
     }
     if (allMessages.has(msg.name)) return;
     allMessages.add(msg.name);
-
     const importPath = `./gen/${msg.file.name.replace(".proto", "")}_pb`;
     if (!importMap.has(importPath)) importMap.set(importPath, new Set());
     importMap.get(importPath)!.add(msg.name);
@@ -72,13 +113,8 @@ function processService(service: DescService) {
   const rpcs = service.methods.map((m) => {
     track(m.input);
     track(m.output);
-
     const name = m.name;
-
-    // PER SPEC: methodKind is a string union "unary" | "server_streaming" | etc.
     const isUnary = m.methodKind === "unary";
-
-    // Determine if it's a "Write" operation
     const mutationVerbs = [
       "Create",
       "Update",
@@ -90,19 +126,22 @@ function processService(service: DescService) {
       "Add",
     ];
     const isMutation = mutationVerbs.some((v) => name.startsWith(v));
-
-    // Semantic Query: Any Unary method that isn't a mutation
     const isQuery = isUnary && !isMutation;
 
-    // Detect Pagination Structure
-    const reqPath = findPaginationPath(m.input);
-    const resPath = findPaginationPath(m.output);
-    const isPaginated = isQuery && !!reqPath && !!resPath;
+    // PAGINATION DISCOVERY
+    const reqCandidate = findBestPaginationCandidate(m.input, true);
+    const resCandidate = findBestPaginationCandidate(m.output, false);
+
+    // Threshold: Only paginate if we have a reasonably confident match in both directions
+    const isPaginated =
+      isQuery &&
+      reqCandidate &&
+      resCandidate &&
+      reqCandidate.score + resCandidate.score > 25;
 
     return {
       functionName: name.charAt(0).toLowerCase() + name.slice(1),
       hookName: `use${name}`,
-      // Resource grouping for cache keys: ListAllCustomers -> Customers
       resource:
         name.replace(
           /^(Get|ListAll|List|Search|Create|Update|Delete|Remove|Patch|Post|Set|Add)/,
@@ -112,8 +151,9 @@ function processService(service: DescService) {
       outputType: m.output.name,
       isQuery,
       isPaginated,
-      reqPath: reqPath?.join("."),
-      resPath: resPath?.join("."),
+      reqPath: reqCandidate?.path.join("."),
+      resPath: resCandidate?.path.join("."),
+      pageType: reqCandidate?.type || "string",
     };
   });
 
@@ -132,7 +172,7 @@ function processService(service: DescService) {
 
 const plugin = createEcmaScriptPlugin({
   name: "protoc-gen-connect-vue",
-  version: "v1.2.1",
+  version: "v1.4.0",
   generateTs: (schema) => {
     const service = schema.files.flatMap((f) => f.services)[0];
     if (!service) return;

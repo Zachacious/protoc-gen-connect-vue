@@ -1,33 +1,23 @@
 /**
  * Async Action: {{functionName}}
- * Manual execution outside of the reactive cycle.
  */
 const {{functionName}} = async (req: {{inputType}}): Promise<APIResponse<{{outputType}}>> => {
   const res = await callConnect(client.value.{{functionName}}.bind(client.value), req, (res) => res);
-  if (!res.error) {
-    queryClient.invalidateQueries({ queryKey: ["{{resource}}"] });
-  }
+  if (!res.error) queryClient.invalidateQueries({ queryKey: ["{{resource}}"] });
   return res;
 };
 
 /**
- * TanStack Hook: {{hookName}}
- * Reactive hook for Vue components.
+ * Hook: {{hookName}}
  */
 const {{hookName}} = (
-  {{#isQuery}}
-  input: any, 
-  options: any = {}
-  {{/isQuery}}
-  {{^isQuery}}
-  options: any = {}
-  {{/isQuery}}
+  {{#isQuery}}input: any, options: any = {}{{/isQuery}}
+  {{^isQuery}}options: any = {}{{/isQuery}}
 ) => {
   {{#isPaginated}}
   return useInfiniteQuery({
     queryKey: queryKeys.{{functionName}}(input),
     queryFn: async ({ pageParam }) => {
-      // Deep clone to safely inject pageParam
       const req = JSON.parse(JSON.stringify(unref(input)));
       const path = "{{reqPath}}".split('.');
       
@@ -37,17 +27,16 @@ const {{hookName}} = (
         curr = curr[path[i]];
       }
       curr[path[path.length - 1]] = pageParam;
-
       return client.value.{{functionName}}(req);
     },
-    initialPageParam: options.initialPageParam ?? 1,
+    initialPageParam: options.initialPageParam ?? ( "{{pageType}}" === "string" ? "" : 1 ),
     getNextPageParam: (lastPage: any) => {
       const path = "{{resPath}}".split('.');
       const val = path.reduce((o, i) => o?.[i], lastPage);
       
-      // Structural Extraction: handle common field names or objects
+      // If the discovered path is an object (like PageResponse), look for standard keys
       if (typeof val === 'object' && val !== null) {
-        return val.nextPageToken || val.nextPage || (val.pageNumber ? val.pageNumber + 1 : undefined);
+        return val.nextPageToken || val.nextPage || val.pageToken || undefined;
       }
       return val || undefined;
     },
