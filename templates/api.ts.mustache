@@ -58,6 +58,9 @@ export const useApi = () => {
     {{#rpcs}}
     {{functionName}},
     {{hookName}},
+    {{#isPaginated}}
+    {{infiniteHookName}},
+    {{/isPaginated}}
     {{/rpcs}}
     isGlobalLoading,
     queryKeys,

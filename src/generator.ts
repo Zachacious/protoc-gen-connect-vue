@@ -25,71 +25,44 @@ const templates = {
 };
 
 /**
- * The Scoring Engine: Finds the best pagination candidates.
+ * STRICT PATH FINDER
+ * Only accepts fields that are explicitly about pagination.
  */
-function findBestPaginationCandidate(
+function findPaginationPath(
   msg: DescMessage,
   isRequest: boolean,
   depth = 0,
-): { path: string[]; type: "string" | "number"; score: number } | null {
+): string[] | null {
   if (depth > 3) return null;
 
-  let best: {
-    path: string[];
-    type: "string" | "number";
-    score: number;
-  } | null = null;
+  const reqKeywords = [
+    "pagetoken",
+    "pagenumber",
+    "nextpagetoken",
+    "offset",
+    "cursor",
+  ];
+  const resKeywords = ["nextpagetoken", "nextpage", "nextcursor"];
+  const targets = isRequest ? reqKeywords : resKeywords;
 
+  // 1. Direct field match
   for (const f of msg.fields) {
-    let currentScore = 0;
-    const name = f.name.toLowerCase().replace(/_/g, "");
+    const normalized = f.name.toLowerCase().replace(/_/g, "");
+    if (targets.some((t) => normalized.includes(t))) return [f.name];
 
-    // 1. Name Analysis
-    const reqKeywords = ["token", "page", "offset", "cursor", "start", "skip"];
-    const resKeywords = ["next", "token", "more", "hasmore", "cursor", "total"];
-    const targets = isRequest ? reqKeywords : resKeywords;
+    // Special case: "page" object in request
+    if (isRequest && normalized === "page" && f.fieldKind === "message")
+      return [f.name];
+  }
 
-    if (targets.some((t) => name.includes(t))) currentScore += 10;
-    if (name.includes("pagetoken") || name.includes("nextpage"))
-      currentScore += 15;
-
-    // 2. Type Analysis
-    const isString = f.fieldKind === "scalar" && f.scalar === 9; // TYPE_STRING
-    const isNumber =
-      f.fieldKind === "scalar" &&
-      [3, 4, 5, 13, 17, 18].includes(f.scalar as number);
-
-    if (isString || isNumber) {
-      currentScore += 5;
-      if (!best || currentScore > best.score) {
-        best = {
-          path: [f.name],
-          type: isString ? "string" : "number",
-          score: currentScore,
-        };
-      }
-    }
-
-    // 3. Structural Analysis (Recursion)
+  // 2. Nested Search
+  for (const f of msg.fields) {
     if (f.fieldKind === "message") {
-      const nested = findBestPaginationCandidate(
-        f.message,
-        isRequest,
-        depth + 1,
-      );
-      if (nested) {
-        const nestedScore = nested.score + 12; // Encapsulated paging (like PageRequest) is high signal
-        if (!best || nestedScore > best.score) {
-          best = {
-            path: [f.name, ...nested.path],
-            type: nested.type,
-            score: nestedScore,
-          };
-        }
-      }
+      const sub = findPaginationPath(f.message, isRequest, depth + 1);
+      if (sub) return [f.name, ...sub];
     }
   }
-  return best;
+  return null;
 }
 
 function processService(service: DescService) {
@@ -104,6 +77,7 @@ function processService(service: DescService) {
     }
     if (allMessages.has(msg.name)) return;
     allMessages.add(msg.name);
+
     const importPath = `./gen/${msg.file.name.replace(".proto", "")}_pb`;
     if (!importMap.has(importPath)) importMap.set(importPath, new Set());
     importMap.get(importPath)!.add(msg.name);
@@ -114,7 +88,11 @@ function processService(service: DescService) {
     track(m.input);
     track(m.output);
     const name = m.name;
+
+    // 1. Kind Check (String literal for v2)
     const isUnary = m.methodKind === "unary";
+
+    // 2. Verb Check
     const mutationVerbs = [
       "Create",
       "Update",
@@ -128,20 +106,25 @@ function processService(service: DescService) {
     const isMutation = mutationVerbs.some((v) => name.startsWith(v));
     const isQuery = isUnary && !isMutation;
 
-    // PAGINATION DISCOVERY
-    const reqCandidate = findBestPaginationCandidate(m.input, true);
-    const resCandidate = findBestPaginationCandidate(m.output, false);
+    // 3. Pagination Discovery
+    const reqPath = findPaginationPath(m.input, true);
+    const resPath = findPaginationPath(m.output, false);
 
-    // Threshold: Only paginate if we have a reasonably confident match in both directions
-    const isPaginated =
-      isQuery &&
-      reqCandidate &&
-      resCandidate &&
-      reqCandidate.score + resCandidate.score > 25;
+    // SAFETY CHECK: A list endpoint MUST have a repeated field.
+    // We explicitly exclude Maps (which are not lists) to satisfy TypeScript and Logic.
+    const hasRepeatedList = m.output.fields.some((f) => {
+      if (f.fieldKind === "map") return false;
+      // Now safe to check repeated because maps are excluded
+      return (f as { repeated?: boolean }).repeated === true;
+    });
+
+    // 4. Dual Hook Trigger
+    const isPaginated = isQuery && hasRepeatedList && !!reqPath && !!resPath;
 
     return {
       functionName: name.charAt(0).toLowerCase() + name.slice(1),
       hookName: `use${name}`,
+      infiniteHookName: `use${name}Infinite`, // Secondary hook
       resource:
         name.replace(
           /^(Get|ListAll|List|Search|Create|Update|Delete|Remove|Patch|Post|Set|Add)/,
@@ -151,9 +134,8 @@ function processService(service: DescService) {
       outputType: m.output.name,
       isQuery,
       isPaginated,
-      reqPath: reqCandidate?.path.join("."),
-      resPath: resCandidate?.path.join("."),
-      pageType: reqCandidate?.type || "string",
+      reqPath: reqPath?.join("."),
+      resPath: resPath?.join("."),
     };
   });
 
@@ -172,7 +154,7 @@ function processService(service: DescService) {
 
 const plugin = createEcmaScriptPlugin({
   name: "protoc-gen-connect-vue",
-  version: "v1.4.0",
+  version: "v1.8.0",
   generateTs: (schema) => {
     const service = schema.files.flatMap((f) => f.services)[0];
     if (!service) return;

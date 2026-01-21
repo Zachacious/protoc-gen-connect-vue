@@ -7,14 +7,29 @@ const {{functionName}} = async (req: {{inputType}}): Promise<APIResponse<{{outpu
   return res;
 };
 
+{{#isQuery}}
 /**
- * Hook: {{hookName}}
+ * Standard Hook: {{hookName}}
  */
 const {{hookName}} = (
-  {{#isQuery}}input: any, options: any = {}{{/isQuery}}
-  {{^isQuery}}options: any = {}{{/isQuery}}
+  input: any, 
+  options: any = {}
 ) => {
-  {{#isPaginated}}
+  return useQuery({
+    queryKey: queryKeys.{{functionName}}(input),
+    queryFn: () => client.value.{{functionName}}(unref(input)),
+    ...options,
+  });
+};
+
+{{#isPaginated}}
+/**
+ * Infinite Hook: {{infiniteHookName}}
+ */
+const {{infiniteHookName}} = (
+  input: any, 
+  options: any = {}
+) => {
   return useInfiniteQuery({
     queryKey: queryKeys.{{functionName}}(input),
     queryFn: async ({ pageParam }) => {
@@ -29,31 +44,28 @@ const {{hookName}} = (
       curr[path[path.length - 1]] = pageParam;
       return client.value.{{functionName}}(req);
     },
-    initialPageParam: options.initialPageParam ?? ( "{{pageType}}" === "string" ? "" : 1 ),
+    initialPageParam: options.initialPageParam ?? "", 
     getNextPageParam: (lastPage: any) => {
       const path = "{{resPath}}".split('.');
       const val = path.reduce((o, i) => o?.[i], lastPage);
-      
-      // If the discovered path is an object (like PageResponse), look for standard keys
       if (typeof val === 'object' && val !== null) {
-        return val.nextPageToken || val.nextPage || val.pageToken || undefined;
+        return val.nextPageToken || val.nextPage || undefined;
       }
       return val || undefined;
     },
     ...options,
   });
-  {{/isPaginated}}
-  
-  {{^isPaginated}}
-  {{#isQuery}}
-  return useQuery({
-    queryKey: queryKeys.{{functionName}}(input),
-    queryFn: () => client.value.{{functionName}}(unref(input)),
-    ...options,
-  });
-  {{/isQuery}}
-  
-  {{^isQuery}}
+};
+{{/isPaginated}}
+{{/isQuery}}
+
+{{^isQuery}}
+/**
+ * Mutation Hook: {{hookName}}
+ */
+const {{hookName}} = (
+  options: any = {}
+) => {
   return useMutation({
     mutationFn: (req: {{inputType}}) => client.value.{{functionName}}(req),
     onSuccess: async (data, variables, context) => {
@@ -62,6 +74,5 @@ const {{hookName}} = (
     },
     ...options,
   });
-  {{/isQuery}}
-  {{/isPaginated}}
 };
+{{/isQuery}}
