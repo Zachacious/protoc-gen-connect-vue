@@ -1,9 +1,11 @@
 /**
- * Async Wrapper: {{functionName}}
+ * Async: {{functionName}}
  */
 const {{functionName}} = async (req: {{inputType}}): Promise<APIResponse<{{outputType}}>> => {
   const res = await callConnect(client.value.{{functionName}}.bind(client.value), req, (res) => res);
-  if (!res.error) queryClient.invalidateQueries({ queryKey: ["{{resource}}"] });
+  if (!res.error) {
+    queryClient.invalidateQueries({ queryKey: ["{{resource}}"] });
+  }
   return res;
 };
 
@@ -11,31 +13,42 @@ const {{functionName}} = async (req: {{inputType}}): Promise<APIResponse<{{outpu
  * Hook: {{hookName}}
  */
 const {{hookName}} = (
-  {{#isQuery}}input: any, options: any = {}{{/isQuery}}
-  {{^isQuery}}options: any = {}{{/isQuery}}
+  {{#isQuery}}
+  input: any, 
+  options: any = {}
+  {{/isQuery}}
+  {{^isQuery}}
+  options: any = {}
+  {{/isQuery}}
 ) => {
   {{#isPaginated}}
   return useInfiniteQuery({
     queryKey: queryKeys.{{functionName}}(input),
     queryFn: async ({ pageParam }) => {
-      const req = JSON.parse(JSON.stringify(unref(input))); 
+      // Deep clone to avoid mutating reactive state
+      const req = JSON.parse(JSON.stringify(unref(input)));
+      
+      // Structural Injection: Navigate to the field found during generation
       const path = "{{reqPath}}".split('.');
-      let curr = req;
+      let current = req;
       for (let i = 0; i < path.length - 1; i++) {
-        curr[path[i]] = curr[path[i]] || {};
-        curr = curr[path[i]];
+        if (!current[path[i]]) current[path[i]] = {};
+        current = current[path[i]];
       }
-      curr[path[path.length - 1]] = pageParam;
+      current[path[path.length - 1]] = pageParam;
+
       return client.value.{{functionName}}(req);
     },
     initialPageParam: options.initialPageParam ?? 1,
     getNextPageParam: (lastPage: any) => {
+      // Structural Extraction: Navigate to the field found during generation
       const path = "{{resPath}}".split('.');
       return path.reduce((o, i) => o?.[i], lastPage) || undefined;
     },
     ...options,
   });
   {{/isPaginated}}
+  
   {{^isPaginated}}
   {{#isQuery}}
   return useQuery({
@@ -44,12 +57,13 @@ const {{hookName}} = (
     ...options,
   });
   {{/isQuery}}
+  
   {{^isQuery}}
   return useMutation({
     mutationFn: (req: {{inputType}}) => client.value.{{functionName}}(req),
-    onSuccess: async (d, v, c) => {
+    onSuccess: async (data, variables, context) => {
       await queryClient.invalidateQueries({ queryKey: ["{{resource}}"] });
-      if (options.onSuccess) return options.onSuccess(d, v, c);
+      if (options.onSuccess) return options.onSuccess(data, variables, context);
     },
     ...options,
   });

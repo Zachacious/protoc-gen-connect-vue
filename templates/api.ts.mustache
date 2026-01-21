@@ -46,12 +46,21 @@ export const createEmpty = {
 export const useApi = () => {
   const { client } = useGrpcClient();
   const queryClient = useQueryClient();
-  const isGlobalLoading = computed(() => useIsFetching().value > 0 || useIsMutating().value > 0);
+  const isFetching = useIsFetching();
+  const isMutating = useIsMutating();
+  const isGlobalLoading = computed(() => isFetching.value > 0 || isMutating.value > 0);
 
-  {{#rpcs}}{{> rpc}}{{/rpcs}}
+  {{#rpcs}}
+  {{> rpc}}
+  {{/rpcs}}
 
   return {
-    {{#rpcs}}{{functionName}}, {{hookName}}, {{/rpcs}}
-    isGlobalLoading, queryKeys, createEmpty
+    {{#rpcs}}
+    {{functionName}},
+    {{hookName}},
+    {{/rpcs}}
+    isGlobalLoading,
+    queryKeys,
+    createEmpty
   };
 };

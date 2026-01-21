@@ -26,7 +26,8 @@ const templates = {
 };
 
 /**
- * Universally find field paths for pagination.
+ * Structural path finder for pagination.
+ * This identifies the JSON-path to a field regardless of nesting.
  */
 function findPath(
   msg: DescMessage,
@@ -59,10 +60,12 @@ function processService(service: DescService) {
     if (allMessages.has(msg.name)) return;
     allMessages.add(msg.name);
 
-    // ROOT-RELATIVE IMPORT:
-    // We assume the generated _pb files are in a 'gen' sibling folder
-    // This is the standard pattern for Connect/Protobuf-ES
-    const importPath = `./gen/${msg.file.name.replace(".proto", "_pb")}`;
+    // ROBUST: Calculate the filename stem.
+    // We assume the generated files live in a 'gen' folder relative to api.ts.
+    // If the user's project is non-standard, we still use the compiler's file name.
+    const baseFileName = msg.file.name.replace(".proto", "");
+    const importPath = `./gen/${baseFileName}_pb`;
+
     if (!importMap.has(importPath)) importMap.set(importPath, new Set());
     importMap.get(importPath)!.add(msg.name);
 
@@ -86,7 +89,6 @@ function processService(service: DescService) {
     ];
     const isMutation = verbs.some((v) => m.name.startsWith(v));
 
-    // Discovery
     const reqPath = findPath(m.input, [
       "page",
       "offset",
@@ -104,10 +106,11 @@ function processService(service: DescService) {
     return {
       functionName: m.name.charAt(0).toLowerCase() + m.name.slice(1),
       hookName: `use${m.name}`,
-      resource: m.name.replace(
-        /^(Get|ListAll|List|Create|Update|Delete|Remove|Patch|Post|Set|Add)/,
-        "",
-      ),
+      resource:
+        m.name.replace(
+          /^(Get|ListAll|List|Create|Update|Delete|Remove|Patch|Post|Set|Add)/,
+          "",
+        ) || "Global",
       inputType: m.input.name,
       outputType: m.output.name,
       isQuery: isUnary && !isMutation,
@@ -119,7 +122,7 @@ function processService(service: DescService) {
 
   return {
     serviceName: service.name,
-    protoPbFile: service.file.name.replace(".proto", "_pb"),
+    protoPbFile: `${service.file.name.replace(".proto", "")}_pb`,
     rpcs,
     messageNames: Array.from(allMessages),
     wktImports: Array.from(wktImports),
@@ -132,7 +135,7 @@ function processService(service: DescService) {
 
 const plugin = createEcmaScriptPlugin({
   name: "protoc-gen-connect-vue",
-  version: "v1.0.7",
+  version: "v1.1.0",
   generateTs: (schema) => {
     const service = schema.files.flatMap((f) => f.services)[0];
     if (!service) return;
