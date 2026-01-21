@@ -26,8 +26,8 @@ const templates = {
 };
 
 /**
- * Structural path finder for pagination.
- * This identifies the JSON-path to a field regardless of nesting.
+ * RECURSIVE PATH DISCOVERY
+ * Finds the nested path to a field (e.g., ['paging', 'pageNumber'])
  */
 function findPath(
   msg: DescMessage,
@@ -35,9 +35,11 @@ function findPath(
   depth = 0,
 ): string[] | null {
   if (depth > 4) return null;
+  // Check direct fields first
   for (const f of msg.fields) {
     if (targets.includes(f.name.toLowerCase())) return [f.name];
   }
+  // Search deeper
   for (const f of msg.fields) {
     if (f.fieldKind === "message") {
       const p = findPath(f.message, targets, depth + 1);
@@ -60,9 +62,6 @@ function processService(service: DescService) {
     if (allMessages.has(msg.name)) return;
     allMessages.add(msg.name);
 
-    // ROBUST: Calculate the filename stem.
-    // We assume the generated files live in a 'gen' folder relative to api.ts.
-    // If the user's project is non-standard, we still use the compiler's file name.
     const baseFileName = msg.file.name.replace(".proto", "");
     const importPath = `./gen/${baseFileName}_pb`;
 
@@ -76,8 +75,11 @@ function processService(service: DescService) {
     track(m.input);
     track(m.output);
 
+    const name = m.name;
     const isUnary = (m.methodKind as any) === METHOD_KIND_UNARY;
-    const verbs = [
+
+    // VERB DISCOVERY
+    const mutationVerbs = [
       "Create",
       "Update",
       "Delete",
@@ -87,8 +89,9 @@ function processService(service: DescService) {
       "Set",
       "Add",
     ];
-    const isMutation = verbs.some((v) => m.name.startsWith(v));
+    const isMutation = mutationVerbs.some((v) => name.startsWith(v));
 
+    // PAGINATION DISCOVERY (Structural)
     const reqPath = findPath(m.input, [
       "page",
       "offset",
@@ -103,18 +106,23 @@ function processService(service: DescService) {
       "nextcursor",
     ]);
 
+    // DECISION LOGIC
+    const isQuery = isUnary && !isMutation;
+    const isPaginated = isQuery && !!reqPath && !!resPath;
+
     return {
-      functionName: m.name.charAt(0).toLowerCase() + m.name.slice(1),
-      hookName: `use${m.name}`,
+      functionName: name.charAt(0).toLowerCase() + name.slice(1),
+      hookName: `use${name}`,
+      // Resource: ListAllCustomers -> Customers
       resource:
-        m.name.replace(
-          /^(Get|ListAll|List|Create|Update|Delete|Remove|Patch|Post|Set|Add)/,
+        name.replace(
+          /^(Get|ListAll|List|Search|Create|Update|Delete|Remove|Patch|Post|Set|Add)/,
           "",
         ) || "Global",
       inputType: m.input.name,
       outputType: m.output.name,
-      isQuery: isUnary && !isMutation,
-      isPaginated: isUnary && !isMutation && !!reqPath && !!resPath,
+      isQuery,
+      isPaginated,
       reqPath: reqPath?.join("."),
       resPath: resPath?.join("."),
     };
@@ -135,7 +143,7 @@ function processService(service: DescService) {
 
 const plugin = createEcmaScriptPlugin({
   name: "protoc-gen-connect-vue",
-  version: "v1.1.0",
+  version: "v1.1.1",
   generateTs: (schema) => {
     const service = schema.files.flatMap((f) => f.services)[0];
     if (!service) return;

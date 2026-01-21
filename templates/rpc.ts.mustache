@@ -1,5 +1,5 @@
 /**
- * Async: {{functionName}}
+ * Async Wrapper: {{functionName}}
  */
 const {{functionName}} = async (req: {{inputType}}): Promise<APIResponse<{{outputType}}>> => {
   const res = await callConnect(client.value.{{functionName}}.bind(client.value), req, (res) => res);
@@ -14,7 +14,7 @@ const {{functionName}} = async (req: {{inputType}}): Promise<APIResponse<{{outpu
  */
 const {{hookName}} = (
   {{#isQuery}}
-  input: any, 
+  input: any, // Accepts Ref<{{inputType}}> or {{inputType}}
   options: any = {}
   {{/isQuery}}
   {{^isQuery}}
@@ -25,10 +25,8 @@ const {{hookName}} = (
   return useInfiniteQuery({
     queryKey: queryKeys.{{functionName}}(input),
     queryFn: async ({ pageParam }) => {
-      // Deep clone to avoid mutating reactive state
+      // Safely inject pageParam into the discovered path
       const req = JSON.parse(JSON.stringify(unref(input)));
-      
-      // Structural Injection: Navigate to the field found during generation
       const path = "{{reqPath}}".split('.');
       let current = req;
       for (let i = 0; i < path.length - 1; i++) {
@@ -41,7 +39,6 @@ const {{hookName}} = (
     },
     initialPageParam: options.initialPageParam ?? 1,
     getNextPageParam: (lastPage: any) => {
-      // Structural Extraction: Navigate to the field found during generation
       const path = "{{resPath}}".split('.');
       return path.reduce((o, i) => o?.[i], lastPage) || undefined;
     },
