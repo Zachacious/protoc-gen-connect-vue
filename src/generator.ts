@@ -5,9 +5,6 @@ import * as fs from "fs";
 import * as path from "path";
 import Mustache from "mustache";
 
-// FIX: In @bufbuild/protobuf, Unary is 0. 1 is ServerStreaming.
-const METHOD_KIND_UNARY = 0;
-
 const KNOWN_WKT = [
   "google.protobuf.Empty",
   "google.protobuf.Timestamp",
@@ -28,8 +25,7 @@ const templates = {
 };
 
 /**
- * Structural path finder.
- * Correctly finds nested paths like 'page.pageNumber' or 'page.offset'.
+ * Structural path finder for pagination.
  */
 function findPaginationPath(
   msg: DescMessage,
@@ -37,16 +33,19 @@ function findPaginationPath(
   depth = 0,
 ): string[] | null {
   if (depth > 3) return null;
-  // Look for direct primitive hits (page_number, offset, etc)
+
+  // Look for the actual value fields (page_number, token, etc.)
+  const terminals = ["pagenumber", "offset", "pagetoken", "cursor", "page"];
   for (const f of msg.fields) {
-    if (targets.includes(f.name.toLowerCase().replace(/_/g, "")))
-      return [f.name];
+    const normalized = f.name.toLowerCase().replace(/_/g, "");
+    if (terminals.includes(normalized)) return [f.name];
   }
-  // Search deeper for objects (like common.v1.PageRequest)
+
+  // Recurse into nested objects (like 'page' or 'paging')
   for (const f of msg.fields) {
     if (f.fieldKind === "message") {
-      const p = findPaginationPath(f.message, targets, depth + 1);
-      if (p) return [f.name, ...p];
+      const subPath = findPaginationPath(f.message, targets, depth + 1);
+      if (subPath) return [f.name, ...subPath];
     }
   }
   return null;
@@ -65,11 +64,9 @@ function processService(service: DescService) {
     if (allMessages.has(msg.name)) return;
     allMessages.add(msg.name);
 
-    // Standardize pathing relative to generation root
     const importPath = `./gen/${msg.file.name.replace(".proto", "")}_pb`;
     if (!importMap.has(importPath)) importMap.set(importPath, new Set());
     importMap.get(importPath)!.add(msg.name);
-
     msg.fields.forEach((f) => f.fieldKind === "message" && track(f.message));
   }
 
@@ -78,7 +75,10 @@ function processService(service: DescService) {
     track(m.output);
 
     const name = m.name;
-    const isUnary = m.methodKind === METHOD_KIND_UNARY;
+
+    // FIX: Using string comparison as required by your descriptor version
+    const isUnary = m.methodKind === "unary";
+
     const mutationVerbs = [
       "Create",
       "Update",
@@ -89,26 +89,16 @@ function processService(service: DescService) {
       "Set",
       "Add",
     ];
-    const isMutation = mutationVerbs.some((v) => name.startsWith(v));
+    const isMutationVerb = mutationVerbs.some((v) => name.startsWith(v));
+    const isQueryVerb = ["Get", "List", "Search"].some((v) =>
+      name.startsWith(v),
+    );
 
-    // Find where the page number/offset lives in the request
-    const reqPath = findPaginationPath(m.input, [
-      "pagenumber",
-      "page",
-      "offset",
-      "pagetoken",
-      "cursor",
-    ]);
-    // Find where the next page trigger lives in the response
-    const resPath = findPaginationPath(m.output, [
-      "nextpagetoken",
-      "nextpage",
-      "hasmore",
-      "nextcursor",
-      "page",
-    ]);
+    // A Query is a Unary call that isn't a mutation
+    const isQuery = isUnary && (isQueryVerb || !isMutationVerb);
 
-    const isQuery = isUnary && !isMutation;
+    const reqPath = findPaginationPath(m.input, []);
+    const resPath = findPaginationPath(m.output, []);
     const isPaginated = isQuery && !!reqPath && !!resPath;
 
     return {
@@ -143,7 +133,7 @@ function processService(service: DescService) {
 
 const plugin = createEcmaScriptPlugin({
   name: "protoc-gen-connect-vue",
-  version: "v1.1.2",
+  version: "v1.1.6",
   generateTs: (schema) => {
     const service = schema.files.flatMap((f) => f.services)[0];
     if (!service) return;

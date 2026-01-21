@@ -1,5 +1,5 @@
 /**
- * Async Wrapper: {{functionName}}
+ * Async Action: {{functionName}}
  */
 const {{functionName}} = async (req: {{inputType}}): Promise<APIResponse<{{outputType}}>> => {
   const res = await callConnect(client.value.{{functionName}}.bind(client.value), req, (res) => res);
@@ -28,7 +28,6 @@ const {{hookName}} = (
       const req = JSON.parse(JSON.stringify(unref(input)));
       const path = "{{reqPath}}".split('.');
       
-      // Navigate and set the nested pagination field
       let curr = req;
       for (let i = 0; i < path.length - 1; i++) {
         curr[path[i]] = curr[path[i]] || {};
@@ -41,14 +40,13 @@ const {{hookName}} = (
     initialPageParam: options.initialPageParam ?? 1,
     getNextPageParam: (lastPage: any) => {
       const path = "{{resPath}}".split('.');
-      // Traverse response to find next page/token (handles nested PageResponse)
-      const nextValue = path.reduce((o, i) => o?.[i], lastPage);
+      const val = path.reduce((o, i) => o?.[i], lastPage);
       
-      // If the nextValue is an object (like PageResponse), we look deeper
-      if (typeof nextValue === 'object' && nextValue !== null) {
-        return nextValue.nextPageToken || nextValue.nextPage || nextValue.pageNumber + 1;
+      if (typeof val === 'object' && val !== null) {
+        // Fallback chain for common Protobuf pagination field names
+        return val.nextPageToken || val.nextPage || (val.pageNumber ? val.pageNumber + 1 : undefined);
       }
-      return nextValue || undefined;
+      return val || undefined;
     },
     ...options,
   });
