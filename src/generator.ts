@@ -1,109 +1,80 @@
 #!/usr/bin/env node
 import { createEcmaScriptPlugin, runNodeJs } from "@bufbuild/protoplugin";
-import {
-  type DescService,
-  type DescMessage,
-  type DescFile,
-} from "@bufbuild/protobuf";
+import { type DescService, type DescMessage } from "@bufbuild/protobuf";
 import * as fs from "fs";
 import * as path from "path";
 import Mustache from "mustache";
 
 const METHOD_KIND_UNARY = 1;
-
-const KNOWN_TYPES: Record<string, string> = {
-  "google.protobuf.Empty": "Empty",
-  "google.protobuf.Timestamp": "Timestamp",
-  "google.protobuf.Duration": "Duration",
-};
+const KNOWN_WKT = [
+  "google.protobuf.Empty",
+  "google.protobuf.Timestamp",
+  "google.protobuf.Duration",
+];
 
 const currentDir = new URL(".", import.meta.url).pathname;
 const templateDir = path.join(currentDir, "..", "templates");
 
-const clientTemplate = fs.readFileSync(
-  path.join(templateDir, "client.ts.mustache"),
-  "utf-8",
-);
-const apiTemplate = fs.readFileSync(
-  path.join(templateDir, "api.ts.mustache"),
-  "utf-8",
-);
-const rpcPartial = fs.readFileSync(
-  path.join(templateDir, "rpc.ts.mustache"),
-  "utf-8",
-);
-const indexTemplate = fs.readFileSync(
-  path.join(templateDir, "index.ts.mustache"),
-  "utf-8",
-);
-const partials = { rpc: rpcPartial };
-
-function isPaginatedDeep(
-  message: DescMessage,
-  visited = new Set<string>(),
-): boolean {
-  if (visited.has(message.typeName)) return false;
-  visited.add(message.typeName);
-  const pagingKeys = [
-    "page",
-    "offset",
-    "cursor",
-    "limit",
-    "pagesize",
-    "pagenumber",
-  ];
-  for (const field of message.fields) {
-    if (pagingKeys.includes(field.name.toLowerCase())) return true;
-    if (
-      field.fieldKind === "message" &&
-      isPaginatedDeep(field.message, visited)
-    )
-      return true;
-  }
-  return false;
-}
+const templates = {
+  client: fs.readFileSync(
+    path.join(templateDir, "client.ts.mustache"),
+    "utf-8",
+  ),
+  api: fs.readFileSync(path.join(templateDir, "api.ts.mustache"), "utf-8"),
+  rpc: fs.readFileSync(path.join(templateDir, "rpc.ts.mustache"), "utf-8"),
+  index: fs.readFileSync(path.join(templateDir, "index.ts.mustache"), "utf-8"),
+};
 
 /**
- * Robust Type Tracker
+ * Universally find field paths for pagination.
  */
-function resolveImportPath(message: DescMessage): string {
-  // All generated files live in ./gen relative to api.ts
-  // We mirror the proto directory structure
-  return `./gen/${message.file.name.replace(".proto", "_pb")}`;
+function findPath(
+  msg: DescMessage,
+  targets: string[],
+  depth = 0,
+): string[] | null {
+  if (depth > 4) return null;
+  for (const f of msg.fields) {
+    if (targets.includes(f.name.toLowerCase())) return [f.name];
+  }
+  for (const f of msg.fields) {
+    if (f.fieldKind === "message") {
+      const p = findPath(f.message, targets, depth + 1);
+      if (p) return [f.name, ...p];
+    }
+  }
+  return null;
 }
 
 function processService(service: DescService) {
-  const rpcs: any[] = [];
+  const importMap = new Map<string, Set<string>>();
   const wktImports = new Set<string>();
-  const importMap = new Map<string, Set<string>>(); // Path -> Set of Type Names
-  const allMessages = new Map<string, string>(); // Name -> Path
+  const allMessages = new Set<string>();
 
-  function trackMessage(msg: DescMessage) {
-    if (allMessages.has(msg.name)) return;
-
-    const fullTypeName = msg.typeName;
-    if (KNOWN_TYPES[fullTypeName]) {
-      wktImports.add(KNOWN_TYPES[fullTypeName]);
-      allMessages.set(KNOWN_TYPES[fullTypeName], "@bufbuild/protobuf/wkt");
+  function track(msg: DescMessage) {
+    if (KNOWN_WKT.includes(msg.typeName)) {
+      wktImports.add(msg.name);
       return;
     }
+    if (allMessages.has(msg.name)) return;
+    allMessages.add(msg.name);
 
-    const targetPath = resolveImportPath(msg);
-    if (!importMap.has(targetPath)) importMap.set(targetPath, new Set());
-    importMap.get(targetPath)!.add(msg.name);
-    allMessages.set(msg.name, targetPath);
+    // ROOT-RELATIVE IMPORT:
+    // We assume the generated _pb files are in a 'gen' sibling folder
+    // This is the standard pattern for Connect/Protobuf-ES
+    const importPath = `./gen/${msg.file.name.replace(".proto", "_pb")}`;
+    if (!importMap.has(importPath)) importMap.set(importPath, new Set());
+    importMap.get(importPath)!.add(msg.name);
 
-    // Deep crawl for createEmpty
-    for (const field of msg.fields) {
-      if (field.fieldKind === "message") trackMessage(field.message);
-    }
+    msg.fields.forEach((f) => f.fieldKind === "message" && track(f.message));
   }
 
-  for (const method of service.methods) {
-    trackMessage(method.input);
-    trackMessage(method.output);
+  const rpcs = service.methods.map((m) => {
+    track(m.input);
+    track(m.output);
 
-    const mutationVerbs = [
+    const isUnary = (m.methodKind as any) === METHOD_KIND_UNARY;
+    const verbs = [
       "Create",
       "Update",
       "Delete",
@@ -113,35 +84,45 @@ function processService(service: DescService) {
       "Set",
       "Add",
     ];
-    const camelName =
-      method.name.charAt(0).toLowerCase() + method.name.slice(1);
-    let resource = method.name;
-    mutationVerbs.forEach((v) => {
-      if (method.name.startsWith(v)) resource = method.name.replace(v, "");
-    });
+    const isMutation = verbs.some((v) => m.name.startsWith(v));
 
-    rpcs.push({
-      functionName: camelName,
-      hookName: `use${method.name}`,
-      resource,
-      inputType: method.input.name,
-      outputType: method.output.name,
-      isQuery:
-        (method.methodKind as any) === METHOD_KIND_UNARY &&
-        !mutationVerbs.some((v) => method.name.startsWith(v)),
-      isPaginated:
-        isPaginatedDeep(method.input) &&
-        (method.methodKind as any) === METHOD_KIND_UNARY,
-    });
-  }
+    // Discovery
+    const reqPath = findPath(m.input, [
+      "page",
+      "offset",
+      "pagetoken",
+      "cursor",
+      "pagenumber",
+    ]);
+    const resPath = findPath(m.output, [
+      "nextpagetoken",
+      "nextpage",
+      "hasmore",
+      "nextcursor",
+    ]);
+
+    return {
+      functionName: m.name.charAt(0).toLowerCase() + m.name.slice(1),
+      hookName: `use${m.name}`,
+      resource: m.name.replace(
+        /^(Get|ListAll|List|Create|Update|Delete|Remove|Patch|Post|Set|Add)/,
+        "",
+      ),
+      inputType: m.input.name,
+      outputType: m.output.name,
+      isQuery: isUnary && !isMutation,
+      isPaginated: isUnary && !isMutation && !!reqPath && !!resPath,
+      reqPath: reqPath?.join("."),
+      resPath: resPath?.join("."),
+    };
+  });
 
   return {
     serviceName: service.name,
     protoPbFile: service.file.name.replace(".proto", "_pb"),
     rpcs,
-    messageNames: Array.from(allMessages.keys()),
+    messageNames: Array.from(allMessages),
     wktImports: Array.from(wktImports),
-    // Map imports for the template
     externalImports: Array.from(importMap.entries()).map(([path, types]) => ({
       path,
       types: Array.from(types),
@@ -151,20 +132,18 @@ function processService(service: DescService) {
 
 const plugin = createEcmaScriptPlugin({
   name: "protoc-gen-connect-vue",
-  version: "v1.0.4",
+  version: "v1.0.7",
   generateTs: (schema) => {
-    const firstService = schema.files.flatMap((f) => f.services)[0];
-    if (!firstService) return;
-
-    const viewData = processService(firstService);
-
+    const service = schema.files.flatMap((f) => f.services)[0];
+    if (!service) return;
+    const data = processService(service);
     schema
       .generateFile("client.ts")
-      .print(Mustache.render(clientTemplate, viewData));
+      .print(Mustache.render(templates.client, data));
     schema
       .generateFile("api.ts")
-      .print(Mustache.render(apiTemplate, viewData, partials));
-    schema.generateFile("index.ts").print(Mustache.render(indexTemplate, {}));
+      .print(Mustache.render(templates.api, data, { rpc: templates.rpc }));
+    schema.generateFile("index.ts").print(Mustache.render(templates.index, {}));
   },
 });
 

@@ -1,14 +1,9 @@
 import { computed, unref } from "vue";
 import { 
-  useQuery, 
-  useMutation, 
-  useInfiniteQuery, 
-  useQueryClient, 
-  useIsFetching, 
-  useIsMutating 
+  useQuery, useMutation, useInfiniteQuery, useQueryClient, useIsFetching, useIsMutating 
 } from "@tanstack/vue-query";
 import { ConnectError } from "@connectrpc/connect";
-import { create, type MessageInit } from "@bufbuild/protobuf";
+import { create } from "@bufbuild/protobuf";
 import { useGrpcClient } from "./client";
 
 {{#wktImports}}
@@ -24,18 +19,15 @@ import type { {{#types}}{{.}}, {{/types}} } from "{{{path}}}";
 export type APIResponse<T> = { error: string | null; data: T | null; };
 
 async function callConnect<ReqT, ResT, DataT>(
-  connectMethod: (req: ReqT) => Promise<ResT>,
-  request: ReqT,
-  dataExtractor: (res: ResT) => DataT
+  method: (req: ReqT) => Promise<ResT>,
+  req: ReqT,
+  extractor: (res: ResT) => DataT
 ): Promise<APIResponse<DataT>> {
   try {
-    const res = await connectMethod(request);
-    return { error: null, data: dataExtractor(res) };
+    const res = await method(req);
+    return { error: null, data: extractor(res) };
   } catch (err) {
-    return { 
-      error: err instanceof ConnectError ? err.message : "Unknown error", 
-      data: null 
-    };
+    return { error: err instanceof ConnectError ? err.message : "Unknown error", data: null };
   }
 }
 
@@ -47,29 +39,19 @@ export const queryKeys = {
 
 export const createEmpty = {
   {{#messageNames}}
-  {{.}}: (data?: MessageInit<{{.}}>) => create({{.}}Schema, data),
+  {{.}}: (data?: any) => create({{.}}Schema, data) as {{.}},
   {{/messageNames}}
 };
 
 export const useApi = () => {
   const { client } = useGrpcClient();
   const queryClient = useQueryClient();
+  const isGlobalLoading = computed(() => useIsFetching().value > 0 || useIsMutating().value > 0);
 
-  const isFetching = useIsFetching();
-  const isMutating = useIsMutating();
-  const isGlobalLoading = computed(() => isFetching.value > 0 || isMutating.value > 0);
-
-  {{#rpcs}}
-  {{> rpc}}
-  {{/rpcs}}
+  {{#rpcs}}{{> rpc}}{{/rpcs}}
 
   return {
-    {{#rpcs}}
-    {{functionName}},
-    {{hookName}},
-    {{/rpcs}}
-    isGlobalLoading,
-    queryKeys,
-    createEmpty
+    {{#rpcs}}{{functionName}}, {{hookName}}, {{/rpcs}}
+    isGlobalLoading, queryKeys, createEmpty
   };
 };

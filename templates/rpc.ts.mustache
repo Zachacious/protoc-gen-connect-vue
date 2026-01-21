@@ -1,41 +1,41 @@
 /**
- * Standard Async: {{functionName}}
- * Used for manual actions. Invalidates the cache for this resource on success.
+ * Async Wrapper: {{functionName}}
  */
 const {{functionName}} = async (req: {{inputType}}): Promise<APIResponse<{{outputType}}>> => {
   const res = await callConnect(client.value.{{functionName}}.bind(client.value), req, (res) => res);
-  if (!res.error) {
-    queryClient.invalidateQueries({ queryKey: ["{{resource}}"] });
-  }
+  if (!res.error) queryClient.invalidateQueries({ queryKey: ["{{resource}}"] });
   return res;
 };
 
 /**
- * TanStack Hook: {{hookName}}
- * Provides reactive data binding with caching.
+ * Hook: {{hookName}}
  */
 const {{hookName}} = (
-  {{#isQuery}}
-  input: any, // Accepts Ref<{{inputType}}> or {{inputType}}
-  options: any = {}
-  {{/isQuery}}
-  {{^isQuery}}
-  options: any = {}
-  {{/isQuery}}
+  {{#isQuery}}input: any, options: any = {}{{/isQuery}}
+  {{^isQuery}}options: any = {}{{/isQuery}}
 ) => {
   {{#isPaginated}}
   return useInfiniteQuery({
     queryKey: queryKeys.{{functionName}}(input),
     queryFn: async ({ pageParam }) => {
-      const req = { ...unref(input), page: pageParam }; 
+      const req = JSON.parse(JSON.stringify(unref(input))); 
+      const path = "{{reqPath}}".split('.');
+      let curr = req;
+      for (let i = 0; i < path.length - 1; i++) {
+        curr[path[i]] = curr[path[i]] || {};
+        curr = curr[path[i]];
+      }
+      curr[path[path.length - 1]] = pageParam;
       return client.value.{{functionName}}(req);
     },
-    initialPageParam: 1,
-    getNextPageParam: (lastPage: any) => lastPage.nextPage ?? undefined,
+    initialPageParam: options.initialPageParam ?? 1,
+    getNextPageParam: (lastPage: any) => {
+      const path = "{{resPath}}".split('.');
+      return path.reduce((o, i) => o?.[i], lastPage) || undefined;
+    },
     ...options,
   });
   {{/isPaginated}}
-  
   {{^isPaginated}}
   {{#isQuery}}
   return useQuery({
@@ -44,13 +44,12 @@ const {{hookName}} = (
     ...options,
   });
   {{/isQuery}}
-  
   {{^isQuery}}
   return useMutation({
     mutationFn: (req: {{inputType}}) => client.value.{{functionName}}(req),
-    onSuccess: async (data, variables, context) => {
+    onSuccess: async (d, v, c) => {
       await queryClient.invalidateQueries({ queryKey: ["{{resource}}"] });
-      if (options.onSuccess) return options.onSuccess(data, variables, context);
+      if (options.onSuccess) return options.onSuccess(d, v, c);
     },
     ...options,
   });
