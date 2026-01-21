@@ -5,7 +5,9 @@ import * as fs from "fs";
 import * as path from "path";
 import Mustache from "mustache";
 
-const METHOD_KIND_UNARY = 1;
+// FIX: In @bufbuild/protobuf, Unary is 0. 1 is ServerStreaming.
+const METHOD_KIND_UNARY = 0;
+
 const KNOWN_WKT = [
   "google.protobuf.Empty",
   "google.protobuf.Timestamp",
@@ -26,23 +28,24 @@ const templates = {
 };
 
 /**
- * RECURSIVE PATH DISCOVERY
- * Finds the nested path to a field (e.g., ['paging', 'pageNumber'])
+ * Structural path finder.
+ * Correctly finds nested paths like 'page.pageNumber' or 'page.offset'.
  */
-function findPath(
+function findPaginationPath(
   msg: DescMessage,
   targets: string[],
   depth = 0,
 ): string[] | null {
-  if (depth > 4) return null;
-  // Check direct fields first
+  if (depth > 3) return null;
+  // Look for direct primitive hits (page_number, offset, etc)
   for (const f of msg.fields) {
-    if (targets.includes(f.name.toLowerCase())) return [f.name];
+    if (targets.includes(f.name.toLowerCase().replace(/_/g, "")))
+      return [f.name];
   }
-  // Search deeper
+  // Search deeper for objects (like common.v1.PageRequest)
   for (const f of msg.fields) {
     if (f.fieldKind === "message") {
-      const p = findPath(f.message, targets, depth + 1);
+      const p = findPaginationPath(f.message, targets, depth + 1);
       if (p) return [f.name, ...p];
     }
   }
@@ -62,9 +65,8 @@ function processService(service: DescService) {
     if (allMessages.has(msg.name)) return;
     allMessages.add(msg.name);
 
-    const baseFileName = msg.file.name.replace(".proto", "");
-    const importPath = `./gen/${baseFileName}_pb`;
-
+    // Standardize pathing relative to generation root
+    const importPath = `./gen/${msg.file.name.replace(".proto", "")}_pb`;
     if (!importMap.has(importPath)) importMap.set(importPath, new Set());
     importMap.get(importPath)!.add(msg.name);
 
@@ -76,9 +78,7 @@ function processService(service: DescService) {
     track(m.output);
 
     const name = m.name;
-    const isUnary = (m.methodKind as any) === METHOD_KIND_UNARY;
-
-    // VERB DISCOVERY
+    const isUnary = m.methodKind === METHOD_KIND_UNARY;
     const mutationVerbs = [
       "Create",
       "Update",
@@ -91,29 +91,29 @@ function processService(service: DescService) {
     ];
     const isMutation = mutationVerbs.some((v) => name.startsWith(v));
 
-    // PAGINATION DISCOVERY (Structural)
-    const reqPath = findPath(m.input, [
+    // Find where the page number/offset lives in the request
+    const reqPath = findPaginationPath(m.input, [
+      "pagenumber",
       "page",
       "offset",
       "pagetoken",
       "cursor",
-      "pagenumber",
     ]);
-    const resPath = findPath(m.output, [
+    // Find where the next page trigger lives in the response
+    const resPath = findPaginationPath(m.output, [
       "nextpagetoken",
       "nextpage",
       "hasmore",
       "nextcursor",
+      "page",
     ]);
 
-    // DECISION LOGIC
     const isQuery = isUnary && !isMutation;
     const isPaginated = isQuery && !!reqPath && !!resPath;
 
     return {
       functionName: name.charAt(0).toLowerCase() + name.slice(1),
       hookName: `use${name}`,
-      // Resource: ListAllCustomers -> Customers
       resource:
         name.replace(
           /^(Get|ListAll|List|Search|Create|Update|Delete|Remove|Patch|Post|Set|Add)/,
@@ -143,7 +143,7 @@ function processService(service: DescService) {
 
 const plugin = createEcmaScriptPlugin({
   name: "protoc-gen-connect-vue",
-  version: "v1.1.1",
+  version: "v1.1.2",
   generateTs: (schema) => {
     const service = schema.files.flatMap((f) => f.services)[0];
     if (!service) return;

@@ -14,7 +14,7 @@ const {{functionName}} = async (req: {{inputType}}): Promise<APIResponse<{{outpu
  */
 const {{hookName}} = (
   {{#isQuery}}
-  input: any, // Accepts Ref<{{inputType}}> or {{inputType}}
+  input: any, 
   options: any = {}
   {{/isQuery}}
   {{^isQuery}}
@@ -25,22 +25,30 @@ const {{hookName}} = (
   return useInfiniteQuery({
     queryKey: queryKeys.{{functionName}}(input),
     queryFn: async ({ pageParam }) => {
-      // Safely inject pageParam into the discovered path
       const req = JSON.parse(JSON.stringify(unref(input)));
       const path = "{{reqPath}}".split('.');
-      let current = req;
+      
+      // Navigate and set the nested pagination field
+      let curr = req;
       for (let i = 0; i < path.length - 1; i++) {
-        if (!current[path[i]]) current[path[i]] = {};
-        current = current[path[i]];
+        curr[path[i]] = curr[path[i]] || {};
+        curr = curr[path[i]];
       }
-      current[path[path.length - 1]] = pageParam;
+      curr[path[path.length - 1]] = pageParam;
 
       return client.value.{{functionName}}(req);
     },
     initialPageParam: options.initialPageParam ?? 1,
     getNextPageParam: (lastPage: any) => {
       const path = "{{resPath}}".split('.');
-      return path.reduce((o, i) => o?.[i], lastPage) || undefined;
+      // Traverse response to find next page/token (handles nested PageResponse)
+      const nextValue = path.reduce((o, i) => o?.[i], lastPage);
+      
+      // If the nextValue is an object (like PageResponse), we look deeper
+      if (typeof nextValue === 'object' && nextValue !== null) {
+        return nextValue.nextPageToken || nextValue.nextPage || nextValue.pageNumber + 1;
+      }
+      return nextValue || undefined;
     },
     ...options,
   });
