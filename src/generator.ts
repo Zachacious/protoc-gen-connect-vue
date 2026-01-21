@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 import { createEcmaScriptPlugin, runNodeJs } from "@bufbuild/protoplugin";
-import { type DescService, type DescMessage } from "@bufbuild/protobuf";
+import {
+  type DescService,
+  type DescMessage,
+  type DescField,
+} from "@bufbuild/protobuf";
 import * as fs from "fs";
 import * as path from "path";
 import Mustache from "mustache";
@@ -25,8 +29,8 @@ const templates = {
 };
 
 /**
- * STRICT PATH FINDER
- * Only accepts fields that are explicitly about pagination.
+ * RECURSIVE PATH FINDER
+ * Prioritizes finding the actual scalar token/number field.
  */
 function findPaginationPath(
   msg: DescMessage,
@@ -45,30 +49,48 @@ function findPaginationPath(
   const resKeywords = ["nextpagetoken", "nextpage", "nextcursor"];
   const targets = isRequest ? reqKeywords : resKeywords;
 
-  // 1. Direct field match
+  // 1. Search Nested Objects FIRST (Fixes the "premature stop" issue)
+  // We prefer "page.page_token" over just "page"
+  for (const f of msg.fields) {
+    if (f.fieldKind === "message") {
+      // Don't recurse into generic fields unless they look promising
+      // But always recurse into "page", "paging", "meta"
+      const name = f.name.toLowerCase();
+      if (
+        name.includes("page") ||
+        name.includes("meta") ||
+        name.includes("paging")
+      ) {
+        const sub = findPaginationPath(f.message, isRequest, depth + 1);
+        if (sub) return [f.name, ...sub];
+      }
+    }
+  }
+
+  // 2. Direct field match (Scalar)
   for (const f of msg.fields) {
     const normalized = f.name.toLowerCase().replace(/_/g, "");
     if (targets.some((t) => normalized.includes(t))) return [f.name];
-
-    // Special case: "page" object in request
-    if (isRequest && normalized === "page" && f.fieldKind === "message")
-      return [f.name];
   }
 
-  // 2. Nested Search
-  for (const f of msg.fields) {
-    if (f.fieldKind === "message") {
-      const sub = findPaginationPath(f.message, isRequest, depth + 1);
-      if (sub) return [f.name, ...sub];
-    }
-  }
   return null;
+}
+
+/**
+ * Safe runtime check for repeated fields.
+ */
+function isRepeatedSafe(f: DescField): boolean {
+  // Exclude maps
+  if (f.fieldKind === "map") return false;
+  // Runtime check for 'repeated' property
+  return "repeated" in f && (f as any).repeated === true;
 }
 
 function processService(service: DescService) {
   const importMap = new Map<string, Set<string>>();
   const wktImports = new Set<string>();
   const allMessages = new Set<string>();
+  const debugLog: string[] = [];
 
   function track(msg: DescMessage) {
     if (KNOWN_WKT.includes(msg.typeName)) {
@@ -89,10 +111,7 @@ function processService(service: DescService) {
     track(m.output);
     const name = m.name;
 
-    // 1. Kind Check (String literal for v2)
     const isUnary = m.methodKind === "unary";
-
-    // 2. Verb Check
     const mutationVerbs = [
       "Create",
       "Update",
@@ -106,25 +125,28 @@ function processService(service: DescService) {
     const isMutation = mutationVerbs.some((v) => name.startsWith(v));
     const isQuery = isUnary && !isMutation;
 
-    // 3. Pagination Discovery
     const reqPath = findPaginationPath(m.input, true);
     const resPath = findPaginationPath(m.output, false);
+    const hasRepeatedList = m.output.fields.some((f) => isRepeatedSafe(f));
 
-    // SAFETY CHECK: A list endpoint MUST have a repeated field.
-    // We explicitly exclude Maps (which are not lists) to satisfy TypeScript and Logic.
-    const hasRepeatedList = m.output.fields.some((f) => {
-      if (f.fieldKind === "map") return false;
-      // Now safe to check repeated because maps are excluded
-      return (f as { repeated?: boolean }).repeated === true;
-    });
-
-    // 4. Dual Hook Trigger
+    // Dual Hook Logic
     const isPaginated = isQuery && hasRepeatedList && !!reqPath && !!resPath;
+
+    // Debug Info
+    debugLog.push(`Method: ${name}`);
+    debugLog.push(
+      `  isUnary: ${isUnary}, isMutation: ${isMutation} -> isQuery: ${isQuery}`,
+    );
+    debugLog.push(`  reqPath: ${reqPath?.join(".")}`);
+    debugLog.push(`  resPath: ${resPath?.join(".")}`);
+    debugLog.push(`  hasRepeatedList: ${hasRepeatedList}`);
+    debugLog.push(`  FINAL: isPaginated = ${isPaginated}`);
+    debugLog.push("---");
 
     return {
       functionName: name.charAt(0).toLowerCase() + name.slice(1),
       hookName: `use${name}`,
-      infiniteHookName: `use${name}Infinite`, // Secondary hook
+      infiniteHookName: `use${name}Infinite`,
       resource:
         name.replace(
           /^(Get|ListAll|List|Search|Create|Update|Delete|Remove|Patch|Post|Set|Add)/,
@@ -149,12 +171,13 @@ function processService(service: DescService) {
       path,
       types: Array.from(types),
     })),
+    debugInfo: debugLog.join("\n"), // Pass to template
   };
 }
 
 const plugin = createEcmaScriptPlugin({
   name: "protoc-gen-connect-vue",
-  version: "v1.8.0",
+  version: "v1.9.0",
   generateTs: (schema) => {
     const service = schema.files.flatMap((f) => f.services)[0];
     if (!service) return;
