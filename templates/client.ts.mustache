@@ -54,6 +54,7 @@ export const useGrpcClient = () => {
   const transport = computed(() => createConnectTransport({
     baseUrl: baseUrl.value,
     interceptors: [transportInterceptor],
+    fetchOptions: { credentials: "include" },
   }));
 
   const client = computed(() => createClient({{serviceName}}, transport.value));
