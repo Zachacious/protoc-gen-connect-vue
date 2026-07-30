@@ -16,6 +16,17 @@ Protoc-gen-connect-vue attempts to create the full SDK - The client and API Wrap
 - **Message Initializers:** A createEmpty utility to generate default objects for any Protobuf message type.
 - **Query Key Factory:** Centralized query keys to simplify manual cache invalidation.
 
+## **Compatibility**
+
+| Dependency | Supported versions |
+| --- | --- |
+| `@connectrpc/connect` / `@connectrpc/connect-web` | v1.6+ and v2 |
+| `@bufbuild/protobuf` / `protoc-gen-es` codegen | v2 |
+| `@tanstack/vue-query` | v5 |
+| Vue | 3 |
+
+The generated client configures credentials through a `fetch` override rather than the version-specific `credentials` transport option, so the same generated code type-checks against both connect-web v1.6+ and v2. See the [CHANGELOG](CHANGELOG.md) for the 1.0.21 upgrade notes.
+
 ## **Installation**
 
 ```bash
@@ -92,6 +103,22 @@ setSDKErrorCallback((err, url) => {
  console.error(`API Error at ${url}: ${err.message}`);
 });
 ```
+
+### **3. Credentials / Cookies**
+
+The generated transport sends cookies cross-origin by default (`credentials: "include"`), applied through a `fetch` override so it works with both `@connectrpc/connect-web` v1 (>= 1.6) and v2 — v2 removed the `credentials` transport option, and the `fetch` override is the recommended replacement.
+
+If your backend's CORS configuration doesn't allow credentials, change the mode at runtime:
+
+```TypeScript
+
+import { setFetchCredentials } from '@/api/generated';
+
+// "include" (default) | "same-origin" | "omit"
+setFetchCredentials('same-origin');
+```
+
+> **Upgrading from 1.0.20 or earlier:** previous releases passed a `fetchOptions` option that connect-web silently ignored, so credentials were never actually applied. From 1.0.21 the `"include"` default genuinely takes effect — if a cross-origin backend's CORS isn't configured for credentials, set `"same-origin"` at startup to keep the old behavior. Details in the [CHANGELOG](CHANGELOG.md).
 
 ## **Usage**
 

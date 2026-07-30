@@ -32,6 +32,23 @@ export type ErrorCallback = (error: ConnectError, url: string) => void;
 let onError: ErrorCallback = () => {};
 export const setSDKErrorCallback = (cb: ErrorCallback) => { onError = cb; };
 
+// --- FETCH CREDENTIALS ---
+// connect-web v1 exposed a `credentials` option on the transport; v2 removed it
+// in favor of overriding `fetch`. Wrapping fetch works on both major versions.
+const credentialsMode = ref<RequestCredentials>("include");
+
+/**
+ * Set the fetch credentials mode ("include" | "same-origin" | "omit").
+ * Defaults to "include" so cookie-based auth works cross-origin.
+ * Takes effect on the next request; no transport rebuild required.
+ */
+export const setFetchCredentials = (mode: RequestCredentials) => {
+  credentialsMode.value = mode;
+};
+
+const fetchWithCredentials: typeof globalThis.fetch = (input, init) =>
+  globalThis.fetch(input, { ...init, credentials: credentialsMode.value });
+
 const transportInterceptor: Interceptor = (next) => async (req) => {
   const token = await resolveToken();
   if (token) req.header.set("x-api-key", token);
@@ -54,7 +71,7 @@ export const useGrpcClient = () => {
   const transport = computed(() => createConnectTransport({
     baseUrl: baseUrl.value,
     interceptors: [transportInterceptor],
-    fetchOptions: { credentials: "include" },
+    fetch: fetchWithCredentials,
   }));
 
   const client = computed(() => createClient({{serviceName}}, transport.value));
@@ -102,6 +119,11 @@ async function handleUpdate() {
   <button @click="handleUpdate">Update Manually</button>
   <p>{{ manualResult }}</p>
 </template>
+
+// Cookies are sent cross-origin by default (credentials: "include").
+// If your backend's CORS config doesn't allow credentials, opt out with:
+// import { setFetchCredentials } from '@/api';
+// setFetchCredentials("same-origin");
 
 // use this to set the error interceptor - for instance to log to sentry or something
 import { setAuthResolver, setSDKErrorCallback } from '@/api';

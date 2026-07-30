@@ -14,6 +14,10 @@ const KNOWN_WKT = [
 const currentDir = new URL(".", import.meta.url).pathname;
 const templateDir = path.join(currentDir, "..", "templates");
 
+const pkg = JSON.parse(
+  fs.readFileSync(path.join(currentDir, "..", "package.json"), "utf-8"),
+);
+
 const templates = {
   client: fs.readFileSync(
     path.join(templateDir, "client.ts.mustache"),
@@ -154,7 +158,7 @@ function processService(service: DescService) {
 
 const plugin = createEcmaScriptPlugin({
   name: "protoc-gen-connect-vue",
-  version: "v1.10.0",
+  version: `v${pkg.version}`,
   generateTs: (schema) => {
     const service = schema.files.flatMap((f) => f.services)[0];
     if (!service) return;
