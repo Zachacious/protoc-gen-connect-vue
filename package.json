@@ -1,6 +1,6 @@
 {
   "name": "@zachacious/protoc-gen-connect-vue",
-  "version": "1.0.21",
+  "version": "1.0.22",
   "description": "Type-safe Vue 3 SDK generator for ConnectRPC with TanStack Query hooks",
   "keywords": [
     "protoc",
