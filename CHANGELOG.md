@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.22 — 2026-08-03
+
+Documentation and package metadata only. No changes to the generator or the generated output — regenerating is not necessary.
+
+### Changed
+
+- Rewrote the README against the generator's actual behavior. It now documents how methods are classified as queries vs. mutations, how cache resource keys are derived from method names, how infinite queries are detected, the `out` path relationship the generated imports depend on, and the `x-api-key` header the auth resolver feeds.
+- Added a "Known limitations" section covering single-service generation, unary-only support, `any`-typed hook inputs, `onSuccess` overriding the automatic invalidation, and the global `BigInt.prototype.toJSON` patch.
+- npm `description` and `keywords` updated for discoverability on the registry.
+
 ## 1.0.21 — 2026-07-30
 
 ### Fixed
