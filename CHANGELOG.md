@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.23 — 2026-10-13
+
+Regenerate to pick up these fixes.
+
+### Fixed
+
+- **Infinite query hooks now fetch pages after the first.** The pagination paths used the `.proto` field names (`page_token`, `next_page_token`), but protoc-gen-es v2 generates camelCase properties (`pageToken`, `nextPageToken`). Every request was sent with an empty page token, and `getNextPageParam` always returned `undefined`, so the hooks only ever loaded page 1.
+- **No more unused imports in `api.ts`.** Well-known types that appeared only as nested fields (e.g. a `google.protobuf.Timestamp` field) were imported but never referenced, which fails type-checking under `noUnusedLocals`. Well-known types are now imported, as types only, when a method takes or returns them directly (e.g. `Empty`). `useQuery`, `useMutation`, `useInfiniteQuery`, `unref`, and `create` are likewise imported only when the service uses them.
+- The infinite hook's `pageParam` is now typed explicitly, so the generated file no longer fails `strict` with an implicit `any`.
+
 ## 1.0.22 — 2026-08-03
 
 Documentation and package metadata only. No changes to the generator or the generated output — regenerating is not necessary.
