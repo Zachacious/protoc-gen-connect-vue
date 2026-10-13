@@ -32,7 +32,7 @@ const {{infiniteHookName}} = (
 ) => {
   return useInfiniteQuery({
     queryKey: queryKeys.{{functionName}}(input),
-    queryFn: async ({ pageParam }) => {
+    queryFn: async ({ pageParam }: { pageParam: any }) => {
       const req = JSON.parse(JSON.stringify(unref(input)));
       const path = "{{reqPath}}".split('.');
       

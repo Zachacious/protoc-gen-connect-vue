@@ -56,7 +56,8 @@ function findPaginationPath(
         name.includes("paging")
       ) {
         const sub = findPaginationPath(f.message, isRequest, depth + 1);
-        if (sub) return [f.name, ...sub];
+        // localName is the camelCase property protobuf-es v2 generates
+        if (sub) return [f.localName, ...sub];
       }
     }
   }
@@ -64,7 +65,7 @@ function findPaginationPath(
   // 2. Check Direct Fields
   for (const f of msg.fields) {
     const normalized = f.name.toLowerCase().replace(/_/g, "");
-    if (targets.some((t) => normalized.includes(t))) return [f.name];
+    if (targets.some((t) => normalized.includes(t))) return [f.localName];
   }
 
   return null;
@@ -76,9 +77,11 @@ function processService(service: DescService) {
   const allMessages = new Set<string>();
   const debugLog: string[] = [];
 
-  function track(msg: DescMessage) {
+  // WKTs are only referenced by name when they are a method's direct
+  // input/output (e.g. Empty); nested ones never appear in the output.
+  function track(msg: DescMessage, direct = false) {
     if (KNOWN_WKT.includes(msg.typeName)) {
-      wktImports.add(msg.name);
+      if (direct) wktImports.add(msg.name);
       return;
     }
     if (allMessages.has(msg.name)) return;
@@ -91,8 +94,8 @@ function processService(service: DescService) {
   }
 
   const rpcs = service.methods.map((m) => {
-    track(m.input);
-    track(m.output);
+    track(m.input, true);
+    track(m.output, true);
     const name = m.name;
 
     const isUnary = m.methodKind === "unary";
@@ -146,6 +149,9 @@ function processService(service: DescService) {
     serviceName: service.name,
     protoPbFile: `${service.file.name.replace(".proto", "")}_pb`,
     rpcs,
+    hasQuery: rpcs.some((r) => r.isQuery),
+    hasMutation: rpcs.some((r) => !r.isQuery),
+    hasPaginated: rpcs.some((r) => r.isPaginated),
     messageNames: Array.from(allMessages),
     wktImports: Array.from(wktImports),
     externalImports: Array.from(importMap.entries()).map(([path, types]) => ({
