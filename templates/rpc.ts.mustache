@@ -17,7 +17,7 @@ const {{hookName}} = (
 ) => {
   return useQuery({
     queryKey: queryKeys.{{functionName}}(input),
-    queryFn: () => client.value.{{functionName}}(unref(input)),
+    queryFn: ({ signal }: { signal: AbortSignal }) => client.value.{{functionName}}(unref(input), { signal }),
     ...options,
   });
 };
@@ -32,7 +32,7 @@ const {{infiniteHookName}} = (
 ) => {
   return useInfiniteQuery({
     queryKey: queryKeys.{{functionName}}(input),
-    queryFn: async ({ pageParam }: { pageParam: any }) => {
+    queryFn: async ({ pageParam, signal }: { pageParam: any; signal: AbortSignal }) => {
       const req = JSON.parse(JSON.stringify(unref(input)));
       const path = "{{reqPath}}".split('.');
       
@@ -42,7 +42,7 @@ const {{infiniteHookName}} = (
         curr = curr[path[i]];
       }
       curr[path[path.length - 1]] = pageParam;
-      return client.value.{{functionName}}(req);
+      return client.value.{{functionName}}(req, { signal });
     },
     initialPageParam: options.initialPageParam ?? "", 
     getNextPageParam: (lastPage: any) => {

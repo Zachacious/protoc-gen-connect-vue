@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.24 — 2026-10-19
+
+Regenerate to pick up this fix.
+
+### Fixed
+
+- **Query hooks now cancel requests that are no longer needed.** The standard and infinite query hooks ignored the `signal` TanStack Query passes to `queryFn`, so a request whose result was no longer wanted (the input changed mid-flight, the component unmounted, the query was cancelled) still ran to completion. The hooks now hand that signal to the Connect call, which aborts the request.
+
 ## 1.0.23 — 2026-10-13
 
 Regenerate to pick up these fixes.
